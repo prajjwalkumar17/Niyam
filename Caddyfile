@@ -1,0 +1,15 @@
+# Niyam - CLI Command Governance System
+#
+# This is a reference Caddyfile. The active config is at:
+#   ~/.config/caddy/Caddyfile
+#
+# Niyam is accessible at:
+#   - http://localhost:3602 (direct)
+#   - http://localhost:8088/niyam (via main Caddy proxy)
+#
+# Backend runs on port 3200 (systemd: niyam.service)
+
+:3602 {
+    encode gzip
+    reverse_proxy 127.0.0.1:3200
+}

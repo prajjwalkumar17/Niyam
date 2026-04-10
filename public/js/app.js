@@ -1,0 +1,586 @@
+/**
+ * Niyam Dashboard - Main Application Logic
+ */
+
+// State
+const state = {
+    currentPage: 'dashboard',
+    ws: null,
+    pendingCount: 0,
+    currentPageRenderer: null,
+    refreshInterval: null,
+    timerInterval: null,
+    autoRefreshEnabled: localStorage.getItem('niyam.autoRefresh') !== 'off'
+};
+
+// API Base URL
+const API_BASE = '/api';
+
+// Auto-refresh interval (ms)
+const AUTO_REFRESH_MS = 10000;
+
+// ═══════════════════════════════════════════
+// Initialization
+// ═══════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', () => {
+    initNavigation();
+    initWebSocket();
+    initSubmitModal();
+    updateAutoRefreshButton();
+
+    // Restore current page from URL hash or last saved page
+    const pageFromHash = (window.location.hash || '').replace('#', '');
+    const savedPage = localStorage.getItem('niyam.currentPage');
+    const initialPage = ['dashboard', 'pending', 'history', 'rules', 'audit'].includes(pageFromHash)
+        ? pageFromHash
+        : (['dashboard', 'pending', 'history', 'rules', 'audit'].includes(savedPage) ? savedPage : 'dashboard');
+
+    navigateTo(initialPage);
+
+    // Support browser back/forward and manual hash edits
+    window.addEventListener('hashchange', () => {
+        const p = (window.location.hash || '').replace('#', '');
+        if (['dashboard', 'pending', 'history', 'rules', 'audit'].includes(p) && p !== state.currentPage) {
+            navigateTo(p);
+        }
+    });
+});
+
+// ═══════════════════════════════════════════
+// Navigation
+// ═══════════════════════════════════════════
+function initNavigation() {
+    document.querySelectorAll('.nav-link').forEach(link => {
+        link.addEventListener('click', (e) => {
+            e.preventDefault();
+            const page = link.dataset.page;
+            navigateTo(page);
+        });
+    });
+}
+
+function navigateTo(page) {
+    if (!['dashboard', 'pending', 'history', 'rules', 'audit'].includes(page)) {
+        page = 'dashboard';
+    }
+
+    state.currentPage = page;
+    localStorage.setItem('niyam.currentPage', page);
+
+    // Keep URL in sync so refresh stays on the same page
+    if (window.location.hash !== `#${page}`) {
+        window.location.hash = page;
+    }
+    
+    // Update nav links
+    document.querySelectorAll('.nav-link').forEach(link => {
+        link.classList.toggle('active', link.dataset.page === page);
+    });
+    
+    // Update page title
+    const titles = {
+        dashboard: 'Dashboard',
+        pending: 'Pending Approvals',
+        history: 'Command History',
+        rules: 'Policy Rules',
+        audit: 'Audit Log'
+    };
+    document.getElementById('page-title').textContent = titles[page] || page;
+    
+    // Render page
+    const container = document.getElementById('page-container');
+    container.innerHTML = '';
+    
+    switch (page) {
+        case 'dashboard': renderDashboard(container); break;
+        case 'pending': renderPending(container); break;
+        case 'history': renderHistory(container); break;
+        case 'rules': renderRules(container); break;
+        case 'audit': renderAudit(container); break;
+    }
+    
+    // Start auto-refresh
+    startAutoRefresh();
+}
+
+// ═══════════════════════════════════════════
+// Auto-Refresh
+// ═══════════════════════════════════════════
+function startAutoRefresh() {
+    if (state.refreshInterval) clearInterval(state.refreshInterval);
+    if (state.timerInterval) clearInterval(state.timerInterval);
+
+    if (!state.autoRefreshEnabled) {
+        return;
+    }
+
+    state.refreshInterval = setInterval(() => {
+        silentlyRefreshCurrentPage();
+    }, AUTO_REFRESH_MS);
+    startTimerUpdates();
+}
+
+function toggleAutoRefresh() {
+    state.autoRefreshEnabled = !state.autoRefreshEnabled;
+    localStorage.setItem('niyam.autoRefresh', state.autoRefreshEnabled ? 'on' : 'off');
+    updateAutoRefreshButton();
+
+    if (state.autoRefreshEnabled) {
+        startAutoRefresh();
+        showNotification('Auto-refresh enabled', 'success');
+    } else {
+        if (state.refreshInterval) clearInterval(state.refreshInterval);
+        if (state.timerInterval) clearInterval(state.timerInterval);
+        state.refreshInterval = null;
+        state.timerInterval = null;
+        showNotification('Auto-refresh paused', 'warning');
+    }
+}
+
+function updateAutoRefreshButton() {
+    const btn = document.getElementById('auto-refresh-toggle');
+    if (!btn) return;
+    btn.textContent = state.autoRefreshEnabled ? '🔄 Auto: ON' : '⏸️ Auto: OFF';
+}
+
+function silentlyRefreshCurrentPage() {
+    const container = document.getElementById('page-container');
+    if (!container || !state.currentPage) return;
+    
+    // Don't refresh if modal is open
+    const submitModal = document.getElementById('submit-modal');
+    const approvalModal = document.getElementById('approval-modal');
+    if ((submitModal && submitModal.style.display === 'flex') ||
+        (approvalModal && approvalModal.style.display === 'flex')) {
+        return;
+    }
+    
+    switch (state.currentPage) {
+        case 'dashboard': renderDashboard(container); break;
+        case 'pending': renderPending(container); break;
+        case 'history': renderHistory(container); break;
+        case 'rules': renderRules(container); break;
+        case 'audit': renderAudit(container); break;
+    }
+    updatePendingBadge();
+}
+
+// ═══════════════════════════════════════════
+// Timer Visualization
+// ═══════════════════════════════════════════
+function startTimerUpdates() {
+    if (state.timerInterval) clearInterval(state.timerInterval);
+    state.timerInterval = setInterval(() => {
+        updateAllTimers();
+    }, 1000);
+}
+
+function updateAllTimers() {
+    document.querySelectorAll('.cmd-timer').forEach(el => {
+        const timeout = el.dataset.timeout;
+        if (!timeout) return;
+        
+        const now = Date.now();
+        const expiry = new Date(timeout).getTime();
+        const created = new Date(el.dataset.created).getTime();
+        const remaining = expiry - now;
+        const total = expiry - created;
+        
+        const ring = el.querySelector('.timer-ring-progress');
+        const text = el.querySelector('.timer-text');
+        const bar = el.querySelector('.timer-bar-fill');
+        
+        if (remaining <= 0) {
+            if (ring) ring.style.strokeDashoffset = '0';
+            if (text) text.textContent = 'Expired';
+            if (bar) { bar.style.width = '100%'; bar.style.background = 'var(--accent-red)'; }
+            el.classList.add('expired');
+            return;
+        }
+        
+        // Percentage remaining
+        const pct = Math.max(0, Math.min(100, (remaining / total) * 100));
+        
+        // Ring animation (SVG circle)
+        if (ring) {
+            const circumference = 2 * Math.PI * 18; // r=18
+            const offset = circumference * (1 - pct / 100);
+            ring.style.strokeDashoffset = offset;
+            
+            // Color based on remaining time
+            if (pct < 20) ring.style.stroke = 'var(--accent-red)';
+            else if (pct < 50) ring.style.stroke = 'var(--accent-yellow)';
+            else ring.style.stroke = 'var(--accent-green)';
+        }
+        
+        // Text
+        if (text) {
+            const hours = Math.floor(remaining / 3600000);
+            const minutes = Math.floor((remaining % 3600000) / 60000);
+            const seconds = Math.floor((remaining % 60000) / 1000);
+            if (hours > 0) text.textContent = `${hours}h ${minutes}m`;
+            else if (minutes > 0) text.textContent = `${minutes}m ${seconds}s`;
+            else text.textContent = `${seconds}s`;
+        }
+        
+        // Bar
+        if (bar) {
+            bar.style.width = `${100 - pct}%`;
+            if (pct < 20) bar.style.background = 'var(--accent-red)';
+            else if (pct < 50) bar.style.background = 'var(--accent-yellow)';
+            else bar.style.background = 'var(--accent-green)';
+        }
+    });
+}
+
+function renderTimer(timeoutAt, createdAt, type = 'ring') {
+    if (!timeoutAt) return '';
+    const ts = new Date(timeoutAt).getTime();
+    const cs = new Date(createdAt).getTime();
+    const remaining = ts - Date.now();
+    
+    if (type === 'ring') {
+        const circumference = 2 * Math.PI * 18;
+        const pct = Math.max(0, Math.min(100, (remaining / (ts - cs)) * 100));
+        const offset = circumference * (1 - pct / 100);
+        let color = 'var(--accent-green)';
+        if (pct < 20) color = 'var(--accent-red)';
+        else if (pct < 50) color = 'var(--accent-yellow)';
+        
+        return `<div class="cmd-timer" data-timeout="${timeoutAt}" data-created="${createdAt}">
+            <svg class="timer-ring" viewBox="0 0 44 44">
+                <circle class="timer-ring-bg" cx="22" cy="22" r="18"/>
+                <circle class="timer-ring-progress" cx="22" cy="22" r="18" 
+                    style="stroke:${color};stroke-dasharray:${circumference};stroke-dashoffset:${offset}"/>
+            </svg>
+            <span class="timer-text">${remaining > 0 ? '...' : 'Expired'}</span>
+        </div>`;
+    }
+    
+    // Bar type
+    return `<div class="cmd-timer" data-timeout="${timeoutAt}" data-created="${createdAt}">
+        <div class="timer-bar"><div class="timer-bar-fill"></div></div>
+        <span class="timer-text">${remaining > 0 ? '...' : 'Expired'}</span>
+    </div>`;
+}
+
+// ═══════════════════════════════════════════
+// WebSocket
+// ═══════════════════════════════════════════
+function initWebSocket() {
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${location.host}/ws`;
+    
+    function connect() {
+        try {
+            state.ws = new WebSocket(wsUrl);
+        } catch (e) {
+            return;
+        }
+        
+        state.ws.onopen = () => {
+            updateConnectionStatus(true);
+        };
+        
+        state.ws.onclose = () => {
+            updateConnectionStatus(false);
+            setTimeout(connect, 3000);
+        };
+        
+        state.ws.onerror = () => {
+            updateConnectionStatus(false);
+        };
+        
+        state.ws.onmessage = (event) => {
+            try {
+                const msg = JSON.parse(event.data);
+                handleWebSocketMessage(msg);
+            } catch (e) {
+                // Ignore malformed messages
+            }
+        };
+    }
+    
+    connect();
+}
+
+function updateConnectionStatus(connected) {
+    const statusEl = document.getElementById('ws-status');
+    const dot = statusEl.querySelector('.status-dot');
+    const text = statusEl.querySelector('.status-text');
+    
+    if (connected) {
+        dot.className = 'status-dot connected';
+        text.textContent = 'Live';
+    } else {
+        dot.className = 'status-dot disconnected';
+        text.textContent = 'Disconnected';
+    }
+}
+
+function handleWebSocketMessage(msg) {
+    const { type, data } = msg;
+    
+    switch (type) {
+        case 'command_submitted':
+            updatePendingBadge();
+            showNotification(`New command: ${data.command}`, 'info');
+            break;
+        case 'command_approved':
+            updatePendingBadge();
+            showNotification(`Command approved: ${data.command}`, 'success');
+            break;
+        case 'command_rejected':
+            updatePendingBadge();
+            showNotification(`Command rejected: ${data.command}`, 'error');
+            break;
+        case 'command_completed':
+            showNotification(`Command completed: ${data.command}`, 'success');
+            break;
+        case 'command_failed':
+            showNotification(`Command failed: ${data.command}`, 'error');
+            break;
+        case 'command_timeout':
+            updatePendingBadge();
+            showNotification(`Command timed out`, 'warning');
+            break;
+        case 'approval_granted':
+            showNotification(`Approval granted (${data.approvals}/${data.required})`, 'info');
+            break;
+    }
+    
+    // Refresh current page
+    if (state.currentPage) {
+        navigateTo(state.currentPage);
+    }
+}
+
+function updatePendingBadge() {
+    fetch(`${API_BASE}/commands?status=pending&limit=0`)
+        .then(r => r.json())
+        .then(data => {
+            const count = data.total || 0;
+            const badge = document.getElementById('pending-badge');
+            if (count > 0) {
+                badge.style.display = 'inline';
+                badge.textContent = count;
+            } else {
+                badge.style.display = 'none';
+            }
+            state.pendingCount = count;
+        })
+        .catch(() => {});
+}
+
+// ═══════════════════════════════════════════
+// Notifications (in-page, not browser API)
+// ═══════════════════════════════════════════
+function showNotification(message, type = 'info') {
+    const colors = {
+        info: 'var(--accent-cyan)',
+        success: 'var(--accent-green)',
+        error: 'var(--accent-red)',
+        warning: 'var(--accent-yellow)'
+    };
+    
+    const notif = document.createElement('div');
+    notif.style.cssText = `
+        position: fixed; top: 20px; right: 20px; z-index: 2000;
+        padding: 12px 20px; border-radius: 8px;
+        background: var(--bg-secondary); border: 1px solid ${colors[type]};
+        color: var(--text-primary); font-size: 13px;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+        animation: fadeIn 0.3s ease; max-width: 360px;
+    `;
+    notif.textContent = message;
+    document.body.appendChild(notif);
+    
+    setTimeout(() => {
+        notif.style.opacity = '0';
+        notif.style.transition = 'opacity 0.3s';
+        setTimeout(() => notif.remove(), 300);
+    }, 3000);
+}
+
+// ═══════════════════════════════════════════
+// Submit Command Modal
+// ═══════════════════════════════════════════
+function initSubmitModal() {
+    document.getElementById('submit-command-btn').addEventListener('click', () => {
+        document.getElementById('submit-modal').style.display = 'flex';
+    });
+    
+    // Live risk preview
+    document.getElementById('cmd-input').addEventListener('input', (e) => {
+        previewRisk(e.target.value);
+    });
+}
+
+function closeModal() {
+    document.getElementById('submit-modal').style.display = 'none';
+    document.getElementById('cmd-input').value = '';
+    document.getElementById('cmd-args').value = '';
+    document.getElementById('cmd-timeout').value = '';
+    document.getElementById('risk-preview').style.display = 'none';
+}
+
+function previewRisk(command) {
+    const preview = document.getElementById('risk-preview');
+    const label = document.getElementById('risk-preview-label');
+    const text = document.getElementById('risk-preview-text');
+    
+    if (!command.trim()) {
+        preview.style.display = 'none';
+        return;
+    }
+    
+    const risk = classifyRiskLocal(command);
+    preview.style.display = 'flex';
+    label.className = `risk-label ${risk.level.toLowerCase()}`;
+    label.textContent = risk.level;
+    text.textContent = risk.description;
+}
+
+function classifyRiskLocal(command) {
+    const highPatterns = [/pr\s+merge/i, /push\s+.*--force/i, /branch\s+delete/i, /repo\s+delete/i, /workflow\s+run/i, /secret\s+set/i];
+    const medPatterns = [/pr\s+create/i, /issue\s+close/i, /branch\s+create/i, /repo\s+edit/i];
+    const lowPatterns = [/pr\s+view/i, /issue\s+view/i, /repo\s+view/i, /branch\s+list/i, /workflow\s+list/i];
+    
+    for (const p of highPatterns) {
+        if (p.test(command)) return { level: 'HIGH', description: 'Requires 2 approvers + rationale' };
+    }
+    for (const p of medPatterns) {
+        if (p.test(command)) return { level: 'MEDIUM', description: 'Requires 1 approver' };
+    }
+    for (const p of lowPatterns) {
+        if (p.test(command)) return { level: 'LOW', description: 'Auto-approved' };
+    }
+    return { level: 'MEDIUM', description: 'Default classification (no pattern match)' };
+}
+
+async function submitCommand() {
+    const command = document.getElementById('cmd-input').value.trim();
+    const argsStr = document.getElementById('cmd-args').value.trim();
+    const requester = document.getElementById('cmd-requester').value.trim();
+    const timeoutHours = document.getElementById('cmd-timeout').value.trim();
+    
+    if (!command) {
+        showNotification('Command is required', 'error');
+        return;
+    }
+    
+    const args = argsStr ? argsStr.split(',').map(a => a.trim()) : [];
+    
+    const body = { command, args, requester };
+    if (timeoutHours) {
+        const hours = parseFloat(timeoutHours);
+        if (hours > 0 && hours <= 168) {
+            body.timeoutHours = hours;
+        }
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE}/commands`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            const riskLabel = result.riskLevel || 'MEDIUM';
+            const msg = result.autoApproved
+                ? `Command auto-approved (${riskLabel})`
+                : `Command submitted, awaiting approval (${riskLabel})`;
+            showNotification(msg, result.autoApproved ? 'success' : 'info');
+            closeModal();
+            navigateTo(state.currentPage);
+        } else {
+            showNotification(result.error || 'Submission failed', 'error');
+        }
+    } catch (e) {
+        showNotification('Network error', 'error');
+    }
+}
+
+// ═══════════════════════════════════════════
+// Approval Modal
+// ═══════════════════════════════════════════
+let currentApprovalCommandId = null;
+
+function openApprovalModal(commandId, command, riskLevel) {
+    currentApprovalCommandId = commandId;
+    document.getElementById('approval-modal').style.display = 'flex';
+    document.getElementById('approval-command-detail').textContent = command;
+    document.getElementById('approval-rationale').value = '';
+    
+    const requiresRationale = riskLevel === 'HIGH';
+    document.getElementById('approval-modal-title').textContent =
+        requiresRationale ? 'Approve Command (Rationale Required)' : 'Approve Command';
+}
+
+function closeApprovalModal() {
+    document.getElementById('approval-modal').style.display = 'none';
+    currentApprovalCommandId = null;
+}
+
+async function processApproval(decision) {
+    if (!currentApprovalCommandId) return;
+    
+    const rationale = document.getElementById('approval-rationale').value.trim();
+    const endpoint = decision === 'approve' ? 'approve' : 'reject';
+    
+    try {
+        const response = await fetch(`${API_BASE}/approvals/${currentApprovalCommandId}/${endpoint}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                approver: 'admin',
+                rationale: rationale || null
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            showNotification(
+                decision === 'approve' ? 'Command approved' : 'Command rejected',
+                decision === 'approve' ? 'success' : 'warning'
+            );
+            closeApprovalModal();
+            navigateTo(state.currentPage);
+        } else {
+            showNotification(result.error || 'Action failed', 'error');
+        }
+    } catch (e) {
+        showNotification('Network error', 'error');
+    }
+}
+
+// ═══════════════════════════════════════════
+// Utility Functions
+// ═══════════════════════════════════════════
+function formatTime(isoString) {
+    if (!isoString) return '-';
+    const d = new Date(isoString);
+    return d.toLocaleString();
+}
+
+function timeAgo(isoString) {
+    if (!isoString) return '-';
+    const seconds = Math.floor((new Date() - new Date(isoString)) / 1000);
+    if (seconds < 60) return `${seconds}s ago`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
