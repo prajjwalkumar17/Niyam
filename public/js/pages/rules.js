@@ -13,6 +13,7 @@ function renderRules(container) {
                 <option value="allowlist">Allowlist</option>
                 <option value="denylist">Denylist</option>
                 <option value="risk_override">Risk Override</option>
+                <option value="execution_mode">Execution Mode</option>
             </select>
             <button class="btn btn-primary" id="add-rule-btn">+ Add Rule</button>
         </div>
@@ -31,7 +32,7 @@ async function loadRulesPage() {
         let url = `${API_BASE}/rules`;
         if (typeFilter) url += `?ruleType=${typeFilter}`;
         
-        const response = await fetch(url);
+        const response = await apiFetch(url);
         const rules = await response.json();
         
         const list = document.getElementById('rules-list');
@@ -50,6 +51,7 @@ async function loadRulesPage() {
                 <div class="rule-meta">
                     <span class="rule-type-badge ${rule.rule_type}">${rule.rule_type.replace('_', ' ')}</span>
                     ${rule.risk_level ? '<span class="risk-badge ' + rule.risk_level.toLowerCase() + '">' + rule.risk_level + '</span>' : ''}
+                    ${rule.execution_mode ? '<span class="status-badge executing">' + rule.execution_mode + '</span>' : ''}
                     <span class="text-sm text-muted">P:${rule.priority}</span>
                 </div>
                 <div class="rule-actions">
@@ -92,6 +94,7 @@ function openRuleForm(rule = null) {
                         <option value="allowlist" ${rule?.rule_type === 'allowlist' ? 'selected' : ''}>Allowlist</option>
                         <option value="denylist" ${rule?.rule_type === 'denylist' ? 'selected' : ''}>Denylist</option>
                         <option value="risk_override" ${rule?.rule_type === 'risk_override' ? 'selected' : ''}>Risk Override</option>
+                        <option value="execution_mode" ${rule?.rule_type === 'execution_mode' ? 'selected' : ''}>Execution Mode</option>
                     </select>
                 </div>
                 <div class="form-group">
@@ -105,6 +108,14 @@ function openRuleForm(rule = null) {
                         <option value="HIGH" ${rule?.risk_level === 'HIGH' ? 'selected' : ''}>HIGH</option>
                         <option value="MEDIUM" ${rule?.risk_level === 'MEDIUM' ? 'selected' : ''}>MEDIUM</option>
                         <option value="LOW" ${rule?.risk_level === 'LOW' ? 'selected' : ''}>LOW</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Execution Mode</label>
+                    <select class="filter-select" id="rule-execution-mode" style="width:100%">
+                        <option value="" ${!rule?.execution_mode ? 'selected' : ''}>None</option>
+                        <option value="DIRECT" ${rule?.execution_mode === 'DIRECT' ? 'selected' : ''}>DIRECT</option>
+                        <option value="WRAPPER" ${rule?.execution_mode === 'WRAPPER' ? 'selected' : ''}>WRAPPER</option>
                     </select>
                 </div>
                 <div class="form-group">
@@ -135,8 +146,8 @@ async function saveRuleForm() {
         rule_type: document.getElementById('rule-type').value,
         pattern: document.getElementById('rule-pattern').value.trim(),
         risk_level: document.getElementById('rule-risk-level').value || null,
-        priority: parseInt(document.getElementById('rule-priority').value) || 50,
-        actor: 'dashboard-user'
+        execution_mode: document.getElementById('rule-execution-mode').value || null,
+        priority: parseInt(document.getElementById('rule-priority').value) || 50
     };
     
     if (!data.name) {
@@ -148,7 +159,7 @@ async function saveRuleForm() {
         const url = editingRuleId ? `${API_BASE}/rules/${editingRuleId}` : `${API_BASE}/rules`;
         const method = editingRuleId ? 'PUT' : 'POST';
         
-        const response = await fetch(url, {
+        const response = await apiFetch(url, {
             method,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(data)
@@ -169,7 +180,7 @@ async function saveRuleForm() {
 
 async function editRule(ruleId) {
     try {
-        const response = await fetch(`${API_BASE}/rules/${ruleId}`);
+        const response = await apiFetch(`/rules/${ruleId}`);
         const rule = await response.json();
         if (response.ok) {
             openRuleForm(rule);
@@ -181,10 +192,10 @@ async function editRule(ruleId) {
 
 async function toggleRule(ruleId, currentlyEnabled) {
     try {
-        const response = await fetch(`${API_BASE}/rules/${ruleId}`, {
+        const response = await apiFetch(`/rules/${ruleId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ enabled: currentlyEnabled ? 0 : 1, actor: 'dashboard-user' })
+            body: JSON.stringify({ enabled: currentlyEnabled ? 0 : 1 })
         });
         
         if (response.ok) {
@@ -200,10 +211,8 @@ async function deleteRule(ruleId, ruleName) {
     if (!confirm(`Delete rule "${ruleName}"?`)) return;
     
     try {
-        const response = await fetch(`${API_BASE}/rules/${ruleId}`, {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ actor: 'dashboard-user' })
+        const response = await apiFetch(`/rules/${ruleId}`, {
+            method: 'DELETE'
         });
         
         if (response.ok) {

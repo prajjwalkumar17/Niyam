@@ -4,6 +4,7 @@
 
 const { classifyRisk, getApprovalThreshold } = require('./risk-classifier');
 const { matchRules } = require('./rules');
+const { config } = require('../config');
 
 class PolicyEngine {
     constructor(db) {
@@ -27,6 +28,8 @@ class PolicyEngine {
         
         // Classify risk based on rules and built-in classifier
         const classification = classifyRisk(fullCommand, matchedRules);
+        const executionModeRule = matchedRules.find(r => r.rule_type === 'execution_mode' && r.execution_mode);
+        const executionMode = executionModeRule ? executionModeRule.execution_mode : config.EXEC_DEFAULT_MODE;
         
         // Get approval thresholds
         const threshold = getApprovalThreshold(classification.riskLevel);
@@ -40,7 +43,8 @@ class PolicyEngine {
                 riskLevel: classification.riskLevel,
                 matchedRules,
                 threshold,
-                autoApproved: false
+                autoApproved: false,
+                executionMode
             };
         }
         
@@ -53,7 +57,8 @@ class PolicyEngine {
                 riskLevel: classification.riskLevel,
                 matchedRules,
                 threshold,
-                autoApproved: true
+                autoApproved: true,
+                executionMode
             };
         }
         
@@ -61,6 +66,7 @@ class PolicyEngine {
             allowed: true,
             reason: `Command classified as ${classification.riskLevel} risk`,
             riskLevel: classification.riskLevel,
+            executionMode,
             matchedRules,
             threshold,
             autoApproved: classification.riskLevel === 'LOW',

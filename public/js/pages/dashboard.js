@@ -35,7 +35,7 @@ function renderDashboard(container) {
 
 async function loadDashboardStats() {
     try {
-        const response = await fetch(`${API_BASE}/commands/stats/summary`);
+        const response = await apiFetch('/commands/stats/summary');
         const stats = await response.json();
         
         document.getElementById('stat-total').textContent = stats.total || 0;
@@ -50,7 +50,7 @@ async function loadDashboardStats() {
 
 async function loadRecentActivity() {
     try {
-        const response = await fetch(`${API_BASE}/audit?limit=10`);
+        const response = await apiFetch('/audit?limit=10');
         const data = await response.json();
         
         const feed = document.getElementById('recent-activity');
@@ -90,7 +90,7 @@ async function loadRecentActivity() {
 
 async function loadPendingPreview() {
     try {
-        const response = await fetch(`${API_BASE}/commands?status=pending&limit=5`);
+        const response = await apiFetch('/commands?status=pending&limit=5');
         const data = await response.json();
         
         const container = document.getElementById('pending-preview');

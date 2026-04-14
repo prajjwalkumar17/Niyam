@@ -105,7 +105,7 @@ function clearAuditFilters() {
 
 async function loadAuditStats() {
     try {
-        const response = await fetch(`${API_BASE}/audit/stats`);
+        const response = await apiFetch('/audit/stats');
         const stats = await response.json();
         
         // Event distribution
@@ -162,7 +162,7 @@ async function loadAuditLog() {
     }
     
     try {
-        const response = await fetch(`${API_BASE}/audit?${params.toString()}`);
+        const response = await apiFetch(`/audit?${params.toString()}`);
         const data = await response.json();
         
         if (!data.entries || data.entries.length === 0) {
@@ -307,7 +307,7 @@ async function exportAuditLog(format) {
     try {
         showNotification(`Exporting audit log as ${format.toUpperCase()}...`, 'info');
         
-        const response = await fetch(`${API_BASE}/audit/export?${params.toString()}`);
+        const response = await apiFetch(`/audit/export?${params.toString()}`);
         
         if (!response.ok) {
             throw new Error('Export failed');

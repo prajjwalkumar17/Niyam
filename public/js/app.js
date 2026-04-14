@@ -6,6 +6,9 @@
 const state = {
     currentPage: 'dashboard',
     ws: null,
+    principal: null,
+    initialized: false,
+    wsReconnectTimer: null,
     pendingCount: 0,
     currentPageRenderer: null,
     refreshInterval: null,
@@ -23,28 +26,18 @@ const AUTO_REFRESH_MS = 10000;
 // Initialization
 // ═══════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', () => {
-    initNavigation();
-    initWebSocket();
-    initSubmitModal();
+    bootstrapApp();
+});
+
+async function bootstrapApp() {
+    initAuthUi();
     updateAutoRefreshButton();
 
-    // Restore current page from URL hash or last saved page
-    const pageFromHash = (window.location.hash || '').replace('#', '');
-    const savedPage = localStorage.getItem('niyam.currentPage');
-    const initialPage = ['dashboard', 'pending', 'history', 'rules', 'audit'].includes(pageFromHash)
-        ? pageFromHash
-        : (['dashboard', 'pending', 'history', 'rules', 'audit'].includes(savedPage) ? savedPage : 'dashboard');
-
-    navigateTo(initialPage);
-
-    // Support browser back/forward and manual hash edits
-    window.addEventListener('hashchange', () => {
-        const p = (window.location.hash || '').replace('#', '');
-        if (['dashboard', 'pending', 'history', 'rules', 'audit'].includes(p) && p !== state.currentPage) {
-            navigateTo(p);
-        }
-    });
-});
+    const restored = await restoreSession();
+    if (!restored) {
+        enterUnauthenticatedState('Dashboard access requires a local admin session.');
+    }
+}
 
 // ═══════════════════════════════════════════
 // Navigation
@@ -57,6 +50,159 @@ function initNavigation() {
             navigateTo(page);
         });
     });
+}
+
+function initAuthUi() {
+    document.getElementById('login-btn').addEventListener('click', submitLogin);
+    document.getElementById('login-password').addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            submitLogin();
+        }
+    });
+    document.getElementById('logout-btn').addEventListener('click', logout);
+}
+
+async function restoreSession() {
+    try {
+        const response = await fetch(`${API_BASE}/auth/me`);
+        if (!response.ok) {
+            return false;
+        }
+
+        const result = await response.json();
+        enterAuthenticatedState(result.principal);
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+
+function enterAuthenticatedState(principal) {
+    state.principal = principal;
+    hideLoginOverlay();
+    updateSessionUi();
+
+    if (!state.initialized) {
+        initNavigation();
+        initSubmitModal();
+        state.initialized = true;
+
+        const pageFromHash = (window.location.hash || '').replace('#', '');
+        const savedPage = localStorage.getItem('niyam.currentPage');
+        const initialPage = ['dashboard', 'pending', 'history', 'rules', 'audit'].includes(pageFromHash)
+            ? pageFromHash
+            : (['dashboard', 'pending', 'history', 'rules', 'audit'].includes(savedPage) ? savedPage : 'dashboard');
+
+        window.addEventListener('hashchange', () => {
+            const page = (window.location.hash || '').replace('#', '');
+            if (state.principal && ['dashboard', 'pending', 'history', 'rules', 'audit'].includes(page) && page !== state.currentPage) {
+                navigateTo(page);
+            }
+        });
+
+        navigateTo(initialPage);
+    } else {
+        navigateTo(state.currentPage || 'dashboard');
+    }
+
+    document.getElementById('cmd-requester').value = principal.identifier;
+
+    if (!state.ws || state.ws.readyState === WebSocket.CLOSED) {
+        initWebSocket();
+    }
+}
+
+function enterUnauthenticatedState(message) {
+    state.principal = null;
+    updateSessionUi();
+    closeApprovalModal();
+    closeModal();
+    stopRealtime();
+    showLoginOverlay(message);
+}
+
+function updateSessionUi() {
+    const pill = document.getElementById('session-pill');
+    const logoutBtn = document.getElementById('logout-btn');
+    const submitBtn = document.getElementById('submit-command-btn');
+
+    if (!state.principal) {
+        pill.textContent = 'Not signed in';
+        logoutBtn.style.display = 'none';
+        submitBtn.disabled = true;
+        return;
+    }
+
+    pill.textContent = `${state.principal.identifier} · ${state.principal.type}`;
+    logoutBtn.style.display = 'inline-flex';
+    submitBtn.disabled = false;
+}
+
+function showLoginOverlay(message) {
+    document.getElementById('login-overlay').style.display = 'flex';
+    setLoginStatus(message || 'Dashboard access requires a local admin session.');
+    document.getElementById('login-password').focus();
+}
+
+function hideLoginOverlay() {
+    document.getElementById('login-overlay').style.display = 'none';
+    setLoginStatus('Dashboard access requires a local admin session.');
+    document.getElementById('login-password').value = '';
+}
+
+function setLoginStatus(message) {
+    document.getElementById('login-status').textContent = message;
+}
+
+async function submitLogin() {
+    const username = document.getElementById('login-username').value.trim();
+    const password = document.getElementById('login-password').value;
+
+    if (!username || !password) {
+        setLoginStatus('Username and password are required.');
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        const result = await response.json();
+
+        if (!response.ok) {
+            setLoginStatus(result.error || 'Login failed.');
+            return;
+        }
+
+        enterAuthenticatedState(result.principal);
+        showNotification('Signed in', 'success');
+    } catch (error) {
+        setLoginStatus('Network error while signing in.');
+    }
+}
+
+async function logout() {
+    try {
+        await fetch(`${API_BASE}/auth/logout`, { method: 'POST' });
+    } catch (error) {
+        // The local state still needs to be cleared on logout failure.
+    }
+
+    enterUnauthenticatedState('Signed out.');
+}
+
+async function apiFetch(path, options = {}) {
+    const url = path.startsWith('/api') ? path : `${API_BASE}${path}`;
+    const response = await fetch(url, options);
+
+    if (response.status === 401) {
+        enterUnauthenticatedState('Session expired. Sign in again.');
+        throw new Error('Authentication required');
+    }
+
+    return response;
 }
 
 function navigateTo(page) {
@@ -118,6 +264,19 @@ function startAutoRefresh() {
         silentlyRefreshCurrentPage();
     }, AUTO_REFRESH_MS);
     startTimerUpdates();
+}
+
+function stopRealtime() {
+    if (state.refreshInterval) clearInterval(state.refreshInterval);
+    if (state.timerInterval) clearInterval(state.timerInterval);
+    if (state.wsReconnectTimer) clearTimeout(state.wsReconnectTimer);
+    state.refreshInterval = null;
+    state.timerInterval = null;
+    state.wsReconnectTimer = null;
+    if (state.ws) {
+        state.ws.close();
+        state.ws = null;
+    }
 }
 
 function toggleAutoRefresh() {
@@ -268,6 +427,10 @@ function renderTimer(timeoutAt, createdAt, type = 'ring') {
 // WebSocket
 // ═══════════════════════════════════════════
 function initWebSocket() {
+    if (!state.principal) {
+        return;
+    }
+
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${location.host}/ws`;
     
@@ -284,7 +447,9 @@ function initWebSocket() {
         
         state.ws.onclose = () => {
             updateConnectionStatus(false);
-            setTimeout(connect, 3000);
+            if (state.principal) {
+                state.wsReconnectTimer = setTimeout(connect, 3000);
+            }
         };
         
         state.ws.onerror = () => {
@@ -356,7 +521,11 @@ function handleWebSocketMessage(msg) {
 }
 
 function updatePendingBadge() {
-    fetch(`${API_BASE}/commands?status=pending&limit=0`)
+    if (!state.principal) {
+        return;
+    }
+
+    apiFetch('/commands?status=pending&limit=0')
         .then(r => r.json())
         .then(data => {
             const count = data.total || 0;
@@ -407,6 +576,11 @@ function showNotification(message, type = 'info') {
 // ═══════════════════════════════════════════
 function initSubmitModal() {
     document.getElementById('submit-command-btn').addEventListener('click', () => {
+        if (!state.principal) {
+            showLoginOverlay('Sign in to submit commands.');
+            return;
+        }
+        document.getElementById('cmd-requester').value = state.principal.identifier;
         document.getElementById('submit-modal').style.display = 'flex';
     });
     
@@ -421,6 +595,7 @@ function closeModal() {
     document.getElementById('cmd-input').value = '';
     document.getElementById('cmd-args').value = '';
     document.getElementById('cmd-timeout').value = '';
+    document.getElementById('cmd-working-dir').value = '';
     document.getElementById('risk-preview').style.display = 'none';
 }
 
@@ -461,8 +636,8 @@ function classifyRiskLocal(command) {
 async function submitCommand() {
     const command = document.getElementById('cmd-input').value.trim();
     const argsStr = document.getElementById('cmd-args').value.trim();
-    const requester = document.getElementById('cmd-requester').value.trim();
     const timeoutHours = document.getElementById('cmd-timeout').value.trim();
+    const workingDir = document.getElementById('cmd-working-dir').value.trim();
     
     if (!command) {
         showNotification('Command is required', 'error');
@@ -471,16 +646,19 @@ async function submitCommand() {
     
     const args = argsStr ? argsStr.split(',').map(a => a.trim()) : [];
     
-    const body = { command, args, requester };
+    const body = { command, args };
     if (timeoutHours) {
         const hours = parseFloat(timeoutHours);
         if (hours > 0 && hours <= 168) {
             body.timeoutHours = hours;
         }
     }
+    if (workingDir) {
+        body.workingDir = workingDir;
+    }
     
     try {
-        const response = await fetch(`${API_BASE}/commands`, {
+        const response = await apiFetch('/commands', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
@@ -532,11 +710,10 @@ async function processApproval(decision) {
     const endpoint = decision === 'approve' ? 'approve' : 'reject';
     
     try {
-        const response = await fetch(`${API_BASE}/approvals/${currentApprovalCommandId}/${endpoint}`, {
+        const response = await apiFetch(`/approvals/${currentApprovalCommandId}/${endpoint}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                approver: 'admin',
                 rationale: rationale || null
             })
         });

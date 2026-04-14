@@ -5,22 +5,21 @@
 const { v4: uuidv4 } = require('uuid');
 const PolicyEngine = require('../policy/engine');
 const { calculateTimeout } = require('../policy/risk-classifier');
-const { validateRationale } = require('../safety/rationale');
-
-function createCommandsRouter(db, broadcast) {
+const { logger, maybeAlertForAuditEvent, metrics } = require('../observability');
+function createCommandsRouter(db, broadcast, hooks = {}) {
     const router = require('express').Router();
     const policyEngine = new PolicyEngine(db);
 
     // Submit a new command for governance
     router.post('/', (req, res) => {
-        const { command, args, requester, requesterType, metadata, timeoutHours } = req.body;
+        const { command, args, metadata, timeoutHours, workingDir } = req.body;
         
         if (!command) {
             return res.status(400).json({ error: 'Command is required' });
         }
-        if (!requester) {
-            return res.status(400).json({ error: 'Requester is required' });
-        }
+
+        const requester = req.principal.identifier;
+        const requesterType = req.principal.type;
         
         const now = new Date().toISOString();
         
@@ -54,8 +53,8 @@ function createCommandsRouter(db, broadcast) {
                 id, command, args, requester, requester_type,
                 risk_level, status, created_at, updated_at,
                 timeout_at, approval_count, required_approvals,
-                rationale_required, metadata
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                rationale_required, metadata, working_dir, execution_mode
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
         
         stmt.run(
@@ -72,12 +71,16 @@ function createCommandsRouter(db, broadcast) {
             0,
             evaluation.threshold.requiredApprovals,
             evaluation.threshold.rationaleRequired ? 1 : 0,
-            JSON.stringify(metadata || {})
+            JSON.stringify(metadata || {}),
+            workingDir || null,
+            evaluation.executionMode
         );
         
         // Log the submission
         logAudit(db, 'command_submitted', 'command', commandId, requester, {
             command, args, riskLevel: evaluation.riskLevel,
+            risk_level: evaluation.riskLevel,
+            executionMode: evaluation.executionMode,
             autoApproved: evaluation.autoApproved,
             matchedRules: evaluation.matchedRules.map(r => r.name)
         });
@@ -88,6 +91,7 @@ function createCommandsRouter(db, broadcast) {
             args: args || [],
             requester,
             riskLevel: evaluation.riskLevel,
+            executionMode: evaluation.executionMode,
             status,
             autoApproved: evaluation.autoApproved,
             timeoutAt,
@@ -103,6 +107,9 @@ function createCommandsRouter(db, broadcast) {
         if (evaluation.autoApproved) {
             if (broadcast) {
                 broadcast('command_auto_approved', { id: commandId, command });
+            }
+            if (hooks.onApproved) {
+                hooks.onApproved(commandId);
             }
         }
         
@@ -222,6 +229,18 @@ function logAudit(db, eventType, entityType, entityId, actor, details) {
         JSON.stringify(details || {}),
         new Date().toISOString()
     );
+    logger.info('audit_event', {
+        eventType,
+        entityType,
+        entityId,
+        actor,
+        details
+    });
+    metrics.incCounter('niyam_audit_events_total', {
+        event_type: eventType,
+        entity_type: entityType || 'unknown'
+    }, 1, 'Audit events');
+    maybeAlertForAuditEvent(eventType, actor, details || {});
 }
 
 module.exports = { createCommandsRouter, logAudit };

@@ -3,22 +3,31 @@
  */
 
 const { WebSocketServer } = require('ws');
+const { logger, metrics } = require('../observability');
 
 class BroadcastManager {
     constructor() {
         this.clients = new Set();
         this.wss = null;
+        this.authenticate = null;
     }
 
     /**
      * Initialize WebSocket server on an HTTP server
      */
-    init(server) {
+    init(server, options = {}) {
+        this.authenticate = options.authenticate || null;
         this.wss = new WebSocketServer({ server, path: '/ws' });
         
-        this.wss.on('connection', (ws) => {
+        this.wss.on('connection', (ws, req) => {
+            if (this.authenticate && !this.authenticate(req)) {
+                ws.close(4401, 'Authentication required');
+                return;
+            }
+
             this.clients.add(ws);
-            console.log(`WebSocket client connected. Total: ${this.clients.size}`);
+            metrics.setGauge('niyam_websocket_clients', {}, this.clients.size, 'Connected websocket clients');
+            logger.info('websocket_connected', { clientCount: this.clients.size });
             
             // Send initial connection message
             ws.send(JSON.stringify({
@@ -29,12 +38,14 @@ class BroadcastManager {
             
             ws.on('close', () => {
                 this.clients.delete(ws);
-                console.log(`WebSocket client disconnected. Total: ${this.clients.size}`);
+                metrics.setGauge('niyam_websocket_clients', {}, this.clients.size, 'Connected websocket clients');
+                logger.info('websocket_disconnected', { clientCount: this.clients.size });
             });
             
             ws.on('error', (err) => {
-                console.error('WebSocket error:', err.message);
+                logger.error('websocket_error', { error: err.message });
                 this.clients.delete(ws);
+                metrics.setGauge('niyam_websocket_clients', {}, this.clients.size, 'Connected websocket clients');
             });
             
             ws.on('message', (data) => {
@@ -68,6 +79,7 @@ class BroadcastManager {
                     client.send(message);
                 } catch (e) {
                     this.clients.delete(client);
+                    metrics.setGauge('niyam_websocket_clients', {}, this.clients.size, 'Connected websocket clients');
                 }
             }
         }
@@ -109,6 +121,7 @@ class BroadcastManager {
             client.close();
         }
         this.clients.clear();
+        metrics.setGauge('niyam_websocket_clients', {}, 0, 'Connected websocket clients');
         if (this.wss) {
             this.wss.close();
         }

@@ -35,6 +35,7 @@ function isMatch(command, rule) {
         case 'denylist':
             return matchDenylist(command, rule.pattern);
         case 'risk_override':
+        case 'execution_mode':
             return matchPattern(command, rule.pattern);
         default:
             return false;
@@ -106,12 +107,16 @@ function validateRule(rule) {
         errors.push('Rule name is required');
     }
     
-    if (!['allowlist', 'denylist', 'pattern', 'risk_override'].includes(rule.rule_type)) {
+    if (!['allowlist', 'denylist', 'pattern', 'risk_override', 'execution_mode'].includes(rule.rule_type)) {
         errors.push(`Invalid rule type: ${rule.rule_type}`);
     }
     
     if (rule.rule_type === 'risk_override' && !['HIGH', 'MEDIUM', 'LOW'].includes(rule.risk_level)) {
         errors.push('Risk override rules must specify a valid risk_level');
+    }
+
+    if (rule.rule_type === 'execution_mode' && !['DIRECT', 'WRAPPER'].includes(rule.execution_mode)) {
+        errors.push('Execution mode rules must specify DIRECT or WRAPPER');
     }
     
     if (rule.pattern) {

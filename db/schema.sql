@@ -20,7 +20,9 @@ CREATE TABLE IF NOT EXISTS commands (
     error TEXT,                   -- Error message if failed
     exit_code INTEGER,
     executed_at TEXT,
-    metadata TEXT                 -- JSON for additional context
+    metadata TEXT,                -- JSON for additional context
+    working_dir TEXT,             -- Working directory for command execution
+    execution_mode TEXT           -- DIRECT or WRAPPER
 );
 
 -- Approvals table: tracks approval/rejection decisions
@@ -42,6 +44,7 @@ CREATE TABLE IF NOT EXISTS rules (
     rule_type TEXT NOT NULL,      -- 'allowlist', 'denylist', 'pattern', 'risk_override'
     pattern TEXT,                 -- Regex or glob pattern
     risk_level TEXT,              -- Risk level to apply
+    execution_mode TEXT,          -- DIRECT or WRAPPER
     enabled INTEGER DEFAULT 1,
     priority INTEGER DEFAULT 0,   -- Higher priority rules evaluated first
     created_at TEXT NOT NULL,
@@ -75,6 +78,17 @@ CREATE TABLE IF NOT EXISTS approvers (
     metadata TEXT
 );
 
+-- Sessions table: persistent dashboard sessions
+CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY,
+    token_hash TEXT NOT NULL UNIQUE,
+    identifier TEXT NOT NULL,
+    roles TEXT NOT NULL,          -- JSON array
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL
+);
+
 -- Create indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_commands_status ON commands(status);
 CREATE INDEX IF NOT EXISTS idx_commands_risk_level ON commands(risk_level);
@@ -87,3 +101,4 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_entity ON audit_log(entity_type, entity
 CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at);
 CREATE INDEX IF NOT EXISTS idx_rules_enabled ON rules(enabled);
 CREATE INDEX IF NOT EXISTS idx_rules_priority ON rules(priority DESC);
+CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);

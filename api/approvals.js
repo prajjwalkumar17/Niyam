@@ -4,20 +4,17 @@
 
 const { v4: uuidv4 } = require('uuid');
 const { logAudit } = require('./commands');
-const { checkTwoPersonApproval } = require('../safety/two-person');
+const { checkTwoPersonApproval, validateSeparateApprover } = require('../safety/two-person');
 const { validateRationale } = require('../safety/rationale');
 
-function createApprovalsRouter(db, broadcast) {
+function createApprovalsRouter(db, broadcast, hooks = {}) {
     const router = require('express').Router();
 
     // Approve a command
     router.post('/:commandId/approve', (req, res) => {
         const { commandId } = req.params;
-        const { approver, rationale } = req.body;
-        
-        if (!approver) {
-            return res.status(400).json({ error: 'Approver is required' });
-        }
+        const { rationale } = req.body;
+        const approver = req.principal.identifier;
         
         const cmd = db.prepare('SELECT * FROM commands WHERE id = ?').get(commandId);
         if (!cmd) {
@@ -51,6 +48,14 @@ function createApprovalsRouter(db, broadcast) {
         if (existingApproval) {
             return res.status(400).json({ error: 'Approver has already approved this command' });
         }
+
+        const existingDecision = db.prepare(
+            'SELECT * FROM approvals WHERE command_id = ? AND approver = ?'
+        ).get(commandId, approver);
+
+        if (existingDecision) {
+            return res.status(400).json({ error: 'Approver has already reviewed this command' });
+        }
         
         // Check if approver is authorized for this risk level
         const approverRecord = db.prepare(
@@ -61,8 +66,14 @@ function createApprovalsRouter(db, broadcast) {
             return res.status(403).json({ error: 'Not an authorized approver' });
         }
         
-        if (cmd.risk_level === 'HIGH' && !approverRecord.can_approve_high) {
-            return res.status(403).json({ error: 'Not authorized to approve HIGH risk commands' });
+        const authorizationError = getApprovalAuthorizationError(cmd.risk_level, approverRecord);
+        if (authorizationError) {
+            return res.status(403).json({ error: authorizationError });
+        }
+
+        const separateApprover = validateSeparateApprover(db, commandId, approver);
+        if (!separateApprover.valid) {
+            return res.status(403).json({ error: separateApprover.reason });
         }
         
         // Record the approval
@@ -73,11 +84,16 @@ function createApprovalsRouter(db, broadcast) {
         `).run(approvalId, commandId, approver, rationale || null, new Date().toISOString());
         
         // Update approval count
-        const newCount = cmd.approval_count + 1;
+        const newCount = db.prepare(
+            "SELECT COUNT(*) as count FROM approvals WHERE command_id = ? AND decision = 'approved'"
+        ).get(commandId).count;
         const now = new Date().toISOString();
         
         // Check if we have enough approvals
-        if (newCount >= cmd.required_approvals) {
+        const twoPersonState = checkTwoPersonApproval(db, commandId);
+        const fullyApproved = newCount >= cmd.required_approvals && twoPersonState.satisfied;
+
+        if (fullyApproved) {
             db.prepare(`
                 UPDATE commands SET status = 'approved', approval_count = ?, updated_at = ?
                 WHERE id = ?
@@ -86,11 +102,15 @@ function createApprovalsRouter(db, broadcast) {
             logAudit(db, 'command_approved', 'command', commandId, approver, {
                 approvalCount: newCount,
                 requiredApprovals: cmd.required_approvals,
+                approver,
                 rationale: rationale || null
             });
             
             if (broadcast) {
                 broadcast('command_approved', { id: commandId, command: cmd.command, approvals: newCount });
+            }
+            if (hooks.onApproved) {
+                hooks.onApproved(commandId);
             }
         } else {
             db.prepare(`
@@ -100,7 +120,9 @@ function createApprovalsRouter(db, broadcast) {
             logAudit(db, 'approval_granted', 'command', commandId, approver, {
                 approvalCount: newCount,
                 requiredApprovals: cmd.required_approvals,
+                approver,
                 stillPending: true,
+                pendingReason: twoPersonState.reason,
                 rationale: rationale || null
             });
             
@@ -119,18 +141,15 @@ function createApprovalsRouter(db, broadcast) {
             commandId,
             approvalCount: newCount,
             requiredApprovals: cmd.required_approvals,
-            fullyApproved: newCount >= cmd.required_approvals
+            fullyApproved
         });
     });
 
     // Reject a command
     router.post('/:commandId/reject', (req, res) => {
         const { commandId } = req.params;
-        const { approver, rationale } = req.body;
-        
-        if (!approver) {
-            return res.status(400).json({ error: 'Approver is required' });
-        }
+        const { rationale } = req.body;
+        const approver = req.principal.identifier;
         
         const cmd = db.prepare('SELECT * FROM commands WHERE id = ?').get(commandId);
         if (!cmd) {
@@ -139,6 +158,32 @@ function createApprovalsRouter(db, broadcast) {
         
         if (cmd.status !== 'pending') {
             return res.status(400).json({ error: `Command is ${cmd.status}, not pending` });
+        }
+
+        const approverRecord = db.prepare(
+            'SELECT * FROM approvers WHERE identifier = ? AND enabled = 1'
+        ).get(approver);
+
+        if (!approverRecord) {
+            return res.status(403).json({ error: 'Not an authorized approver' });
+        }
+
+        const authorizationError = getApprovalAuthorizationError(cmd.risk_level, approverRecord);
+        if (authorizationError) {
+            return res.status(403).json({ error: authorizationError });
+        }
+
+        const existingDecision = db.prepare(
+            'SELECT * FROM approvals WHERE command_id = ? AND approver = ?'
+        ).get(commandId, approver);
+
+        if (existingDecision) {
+            return res.status(400).json({ error: 'Approver has already reviewed this command' });
+        }
+
+        const separateApprover = validateSeparateApprover(db, commandId, approver);
+        if (!separateApprover.valid) {
+            return res.status(403).json({ error: separateApprover.reason });
         }
         
         // Record the rejection
@@ -154,6 +199,7 @@ function createApprovalsRouter(db, broadcast) {
         `).run(new Date().toISOString(), commandId);
         
         logAudit(db, 'command_rejected', 'command', commandId, approver, {
+            approver,
             rationale: rationale || 'No rationale provided'
         });
         
@@ -203,3 +249,15 @@ function createApprovalsRouter(db, broadcast) {
 }
 
 module.exports = { createApprovalsRouter };
+
+function getApprovalAuthorizationError(riskLevel, approverRecord) {
+    if (riskLevel === 'HIGH' && !approverRecord.can_approve_high) {
+        return 'Not authorized to approve HIGH risk commands';
+    }
+
+    if (riskLevel === 'MEDIUM' && !approverRecord.can_approve_medium) {
+        return 'Not authorized to approve MEDIUM risk commands';
+    }
+
+    return null;
+}

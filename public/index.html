@@ -63,11 +63,15 @@
         <header class="topbar">
             <h1 class="page-title" id="page-title">Dashboard</h1>
             <div class="topbar-actions">
+                <div class="session-pill" id="session-pill">Not signed in</div>
                 <button class="btn btn-secondary" id="auto-refresh-toggle" onclick="toggleAutoRefresh()" title="Toggle auto refresh">
                     🔄 Auto: ON
                 </button>
                 <button class="btn btn-primary" id="submit-command-btn">
                     <span class="btn-icon">+</span> Submit Command
+                </button>
+                <button class="btn btn-secondary" id="logout-btn" style="display:none">
+                    Sign Out
                 </button>
             </div>
         </header>
@@ -96,10 +100,14 @@
                 </div>
                 <div class="form-group">
                     <label for="cmd-requester">Requester</label>
-                    <input type="text" id="cmd-requester" class="form-input" placeholder="Your name or agent ID" value="admin">
+                    <input type="text" id="cmd-requester" class="form-input" readonly>
                     
                     <label for="cmd-timeout">Timeout (hours) <span style="color:var(--text-muted);font-weight:normal">optional, default 10h</span></label>
                     <input type="number" id="cmd-timeout" class="form-input" placeholder="e.g. 10" min="1" max="168" step="1">
+                </div>
+                <div class="form-group">
+                    <label for="cmd-working-dir">Working Directory</label>
+                    <input type="text" id="cmd-working-dir" class="form-input" placeholder="Optional absolute path">
                 </div>
                 <div class="risk-preview" id="risk-preview" style="display:none">
                     <span class="risk-label" id="risk-preview-label">RISK</span>
@@ -130,6 +138,29 @@
             <div class="modal-footer">
                 <button class="btn btn-danger" id="reject-btn" onclick="processApproval('reject')">Reject</button>
                 <button class="btn btn-success" id="approve-btn" onclick="processApproval('approve')">Approve</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Login Overlay -->
+    <div class="modal-overlay" id="login-overlay" style="display:none">
+        <div class="modal login-modal">
+            <div class="modal-header">
+                <h2>Sign In</h2>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="login-username">Username</label>
+                    <input type="text" id="login-username" class="form-input" autocomplete="username" value="admin">
+                </div>
+                <div class="form-group">
+                    <label for="login-password">Password</label>
+                    <input type="password" id="login-password" class="form-input" autocomplete="current-password">
+                </div>
+                <div class="text-sm text-muted" id="login-status">Dashboard access requires a local admin session.</div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" id="login-btn">Sign In</button>
             </div>
         </div>
     </div>

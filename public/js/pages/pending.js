@@ -44,7 +44,7 @@ async function loadPendingPage() {
         let url = `${API_BASE}/commands?status=pending&limit=50`;
         if (riskFilter) url += `&riskLevel=${riskFilter}`;
         
-        const response = await fetch(url);
+        const response = await apiFetch(url);
         const data = await response.json();
         
         const tbody = document.getElementById('pending-table-body');

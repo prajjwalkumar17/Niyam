@@ -47,9 +47,9 @@ function createRulesRouter(db, broadcast) {
 
     // Create a new rule
     router.post('/', (req, res) => {
-        const { name, description, rule_type, pattern, risk_level, priority, metadata } = req.body;
+        const { name, description, rule_type, pattern, risk_level, execution_mode, priority, metadata } = req.body;
         
-        const validation = validateRule({ name, rule_type, pattern, risk_level });
+        const validation = validateRule({ name, rule_type, pattern, risk_level, execution_mode });
         if (!validation.valid) {
             return res.status(400).json({ error: 'Validation failed', details: validation.errors });
         }
@@ -58,16 +58,16 @@ function createRulesRouter(db, broadcast) {
         const id = uuidv4();
         
         db.prepare(`
-            INSERT INTO rules (id, name, description, rule_type, pattern, risk_level, enabled, priority, created_at, updated_at, metadata)
-            VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+            INSERT INTO rules (id, name, description, rule_type, pattern, risk_level, execution_mode, enabled, priority, created_at, updated_at, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
         `).run(
             id, name, description || null, rule_type, pattern || null,
-            risk_level || null, priority || 0, now, now,
+            risk_level || null, execution_mode || null, priority || 0, now, now,
             JSON.stringify(metadata || {})
         );
         
-        logAudit(db, 'rule_created', 'rule', id, req.body.actor || 'api', {
-            name, rule_type, pattern, risk_level
+        logAudit(db, 'rule_created', 'rule', id, req.actor, {
+            name, rule_type, pattern, risk_level, execution_mode
         });
         
         if (broadcast) {
@@ -88,14 +88,15 @@ function createRulesRouter(db, broadcast) {
             return res.status(404).json({ error: 'Rule not found' });
         }
         
-        const { name, description, rule_type, pattern, risk_level, enabled, priority, metadata } = req.body;
+        const { name, description, rule_type, pattern, risk_level, execution_mode, enabled, priority, metadata } = req.body;
         
         if (rule_type || pattern) {
             const validation = validateRule({
                 name: name || existing.name,
                 rule_type: rule_type || existing.rule_type,
                 pattern: pattern || existing.pattern,
-                risk_level: risk_level || existing.risk_level
+                risk_level: risk_level || existing.risk_level,
+                execution_mode: execution_mode || existing.execution_mode
             });
             if (!validation.valid) {
                 return res.status(400).json({ error: 'Validation failed', details: validation.errors });
@@ -110,6 +111,7 @@ function createRulesRouter(db, broadcast) {
                 rule_type = COALESCE(?, rule_type),
                 pattern = COALESCE(?, pattern),
                 risk_level = COALESCE(?, risk_level),
+                execution_mode = COALESCE(?, execution_mode),
                 enabled = COALESCE(?, enabled),
                 priority = COALESCE(?, priority),
                 updated_at = ?,
@@ -117,7 +119,7 @@ function createRulesRouter(db, broadcast) {
             WHERE id = ?
         `).run(
             name || null, description || null, rule_type || null,
-            pattern || null, risk_level || null,
+            pattern || null, risk_level || null, execution_mode || null,
             enabled !== undefined ? enabled : null,
             priority !== undefined ? priority : null,
             now,
@@ -125,7 +127,7 @@ function createRulesRouter(db, broadcast) {
             id
         );
         
-        logAudit(db, 'rule_updated', 'rule', id, req.body.actor || 'api', {
+        logAudit(db, 'rule_updated', 'rule', id, req.actor, {
             changes: req.body
         });
         
@@ -148,7 +150,7 @@ function createRulesRouter(db, broadcast) {
         
         db.prepare('DELETE FROM rules WHERE id = ?').run(id);
         
-        logAudit(db, 'rule_deleted', 'rule', id, req.body?.actor || 'api', {
+        logAudit(db, 'rule_deleted', 'rule', id, req.actor, {
             name: existing.name,
             rule_type: existing.rule_type
         });

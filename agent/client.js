@@ -8,6 +8,7 @@ class AgentClient {
     constructor(options = {}) {
         this.baseUrl = options.baseUrl || 'http://localhost:3000';
         this.agentName = options.agentName || 'forger';
+        this.apiToken = options.apiToken || process.env.NIYAM_AGENT_TOKEN || '';
         this.timeout = options.timeout || 10000;
     }
 
@@ -140,11 +141,14 @@ class AgentClient {
                 path: url.pathname + url.search,
                 method,
                 headers: {
-                    'Content-Type': 'application/json',
-                    'X-Agent-Name': this.agentName
+                    'Content-Type': 'application/json'
                 },
                 timeout: this.timeout
             };
+
+            if (this.apiToken) {
+                options.headers.Authorization = `Bearer ${this.apiToken}`;
+            }
             
             const req = http.request(options, (res) => {
                 let data = '';

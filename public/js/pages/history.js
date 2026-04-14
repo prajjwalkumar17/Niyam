@@ -55,7 +55,7 @@ async function loadHistoryPage() {
         if (statusFilter) url += `&status=${statusFilter}`;
         if (riskFilter) url += `&riskLevel=${riskFilter}`;
         
-        const response = await fetch(url);
+        const response = await apiFetch(url);
         const data = await response.json();
         
         const tbody = document.getElementById('history-table-body');
@@ -84,7 +84,7 @@ async function loadHistoryPage() {
 
 async function showCommandDetail(commandId) {
     try {
-        const response = await fetch(`${API_BASE}/commands/${commandId}`);
+        const response = await apiFetch(`/commands/${commandId}`);
         const cmd = await response.json();
         
         const output = cmd.output ? escapeHtml(cmd.output.substring(0, 500)) : 'No output';
