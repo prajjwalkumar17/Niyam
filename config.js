@@ -17,6 +17,20 @@ function parseList(value) {
         .filter(Boolean);
 }
 
+function parseSecretKeyList(value) {
+    const configured = parseList(value).map(item => item.toLowerCase());
+    const defaults = ['token', 'password', 'secret', 'api_key'];
+    const merged = [...defaults];
+
+    for (const item of configured) {
+        if (!merged.includes(item)) {
+            merged.push(item);
+        }
+    }
+
+    return merged;
+}
+
 function parseBooleanEnv(value, fallback) {
     if (value === undefined || value === null || value === '') {
         return fallback;
@@ -123,6 +137,7 @@ const config = {
     EXEC_REQUIRE_ALLOWED_ROOT: parseBooleanEnv(process.env.NIYAM_EXEC_REQUIRE_ALLOWED_ROOT, true),
     EXEC_DEFAULT_MODE: String(process.env.NIYAM_EXEC_DEFAULT_MODE || process.env.NIYAM_EXEC_ISOLATION_MODE || 'direct').toUpperCase(),
     EXEC_WRAPPER: parseExecWrapper(),
+    EXEC_DATA_KEY: process.env.NIYAM_EXEC_DATA_KEY || '',
     EXEC_ENV_ALLOWLIST: [
         'HOME',
         'LANG',
@@ -135,7 +150,11 @@ const config = {
         'TMPDIR',
         'USER',
         ...parseList(process.env.NIYAM_EXEC_ENV_ALLOWLIST)
-    ]
+    ],
+    REDACTION_ENABLED: parseBooleanEnv(process.env.NIYAM_REDACTION_ENABLED, true),
+    REDACTION_REPLACEMENT: process.env.NIYAM_REDACTION_REPLACEMENT || '[REDACTED]',
+    REDACTION_EXTRA_KEYS: parseSecretKeyList(process.env.NIYAM_REDACTION_EXTRA_KEYS),
+    REDACTION_DISABLE_HEURISTICS: parseBooleanEnv(process.env.NIYAM_REDACTION_DISABLE_HEURISTICS, false)
 };
 
 function validateConfig() {
@@ -149,6 +168,10 @@ function validateConfig() {
 
     if (config.EXEC_DEFAULT_MODE === 'WRAPPER' && config.EXEC_WRAPPER.length === 0) {
         throw new Error('NIYAM_EXEC_WRAPPER is required when NIYAM_EXEC_DEFAULT_MODE=WRAPPER');
+    }
+
+    if (config.REDACTION_ENABLED && !config.EXEC_DATA_KEY) {
+        throw new Error('NIYAM_EXEC_DATA_KEY is required when redaction is enabled');
     }
 }
 

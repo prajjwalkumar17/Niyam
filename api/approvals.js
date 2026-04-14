@@ -3,9 +3,10 @@
  */
 
 const { v4: uuidv4 } = require('uuid');
-const { logAudit } = require('./commands');
+const { logAudit, shapeCommandRecord } = require('./commands');
 const { checkTwoPersonApproval, validateSeparateApprover } = require('../safety/two-person');
 const { validateRationale } = require('../safety/rationale');
+const { validateApprovalPayload, validationError } = require('./validation');
 
 function createApprovalsRouter(db, broadcast, hooks = {}) {
     const router = require('express').Router();
@@ -13,7 +14,11 @@ function createApprovalsRouter(db, broadcast, hooks = {}) {
     // Approve a command
     router.post('/:commandId/approve', (req, res) => {
         const { commandId } = req.params;
-        const { rationale } = req.body;
+        const bodyValidation = validateApprovalPayload(req.body);
+        if (!bodyValidation.valid) {
+            return validationError(res, bodyValidation.errors);
+        }
+        const { rationale } = bodyValidation.value;
         const approver = req.principal.identifier;
         
         const cmd = db.prepare('SELECT * FROM commands WHERE id = ?').get(commandId);
@@ -148,7 +153,11 @@ function createApprovalsRouter(db, broadcast, hooks = {}) {
     // Reject a command
     router.post('/:commandId/reject', (req, res) => {
         const { commandId } = req.params;
-        const { rationale } = req.body;
+        const bodyValidation = validateApprovalPayload(req.body);
+        if (!bodyValidation.valid) {
+            return validationError(res, bodyValidation.errors);
+        }
+        const { rationale } = bodyValidation.value;
         const approver = req.principal.identifier;
         
         const cmd = db.prepare('SELECT * FROM commands WHERE id = ?').get(commandId);
@@ -237,12 +246,7 @@ function createApprovalsRouter(db, broadcast, hooks = {}) {
         `).all();
         
         // Parse JSON fields
-        pending.forEach(cmd => {
-            cmd.args = JSON.parse(cmd.args || '[]');
-            cmd.metadata = JSON.parse(cmd.metadata || '{}');
-        });
-        
-        res.json(pending);
+        res.json(pending.map(shapeCommandRecord));
     });
 
     return router;

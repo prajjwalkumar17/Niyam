@@ -5,6 +5,7 @@ This guide covers how teams use Niyam once it is running.
 Related docs:
 
 - [Local setup](./local_setup.md)
+- [Feature guide](./features.md)
 - [API reference](./api_reference.md)
 - [Configuration reference](./configuration.md)
 - [Self-hosted deployment](./deployment.md)
@@ -33,12 +34,15 @@ Niyam evaluates:
 - risk level
 - approval requirements
 - execution mode
+- redaction of sensitive values before storage
 
 Possible outcomes:
 
 - auto-approved and executed
 - pending approval
 - blocked by policy
+
+Before submitting, a user or agent can also simulate the same command and inspect the exact policy result without creating a command row.
 
 ### 2. Review Or Approve
 
@@ -92,6 +96,7 @@ Use it to:
 
 - inspect completed, failed, rejected, and timed-out commands
 - view output and execution metadata
+- see whether a command or output was redacted before storage
 
 ### Rules
 
@@ -105,6 +110,8 @@ Use it to manage:
 
 `execution_mode` is the key rule type for deciding whether a command runs `DIRECT` or `WRAPPER`.
 
+The Rules page also includes built-in rule packs for `git`, `gh`, `docker`, `kubectl`, and `terraform`.
+
 ### Audit
 
 Use it to:
@@ -112,6 +119,7 @@ Use it to:
 - filter by event type, actor, or date
 - export audit logs
 - inspect operational history
+- confirm where redaction occurred
 
 ## API Usage
 
@@ -133,6 +141,35 @@ curl -b /tmp/niyam-cookies.txt \
   -H 'Content-Type: application/json' \
   -d "{\"command\":\"ls\",\"args\":[\"public\"],\"workingDir\":\"$PWD\"}" \
   http://127.0.0.1:3000/api/commands
+```
+
+### Simulate Before Submitting
+
+```bash
+curl -b /tmp/niyam-cookies.txt \
+  -H 'Content-Type: application/json' \
+  -d '{"command":"gh","args":["workflow","run","build.yml"],"metadata":{"source":"cli-preview"}}' \
+  http://127.0.0.1:3000/api/policy/simulate
+```
+
+Use this when an agent or human wants to know the exact risk, approval threshold, execution mode, matched rules, and redaction preview before creating a command record.
+
+### Install A Built-In Rule Pack
+
+```bash
+curl -b /tmp/niyam-cookies.txt \
+  -H 'Content-Type: application/json' \
+  -d '{"mode":"install_if_missing"}' \
+  http://127.0.0.1:3000/api/rule-packs/gh/install
+```
+
+### Preview A Rule Pack Upgrade
+
+```bash
+curl -b /tmp/niyam-cookies.txt \
+  -H 'Content-Type: application/json' \
+  -d '{}' \
+  http://127.0.0.1:3000/api/rule-packs/gh/upgrade-preview
 ```
 
 ### Check Command Status
@@ -187,6 +224,11 @@ const client = new AgentClient({
 });
 
 async function main() {
+  const simulation = await client.simulateCommand('gh', ['workflow', 'run', 'build.yml'], {
+    source: 'example-agent'
+  });
+  console.log('simulation', simulation);
+
   const result = await client.submitCommand('ls', ['public'], {
     source: 'example-agent'
   });
@@ -213,6 +255,12 @@ Examples of good `execution_mode` targets:
 - CI or workflow triggers
 - untrusted tool entrypoints
 
+Examples of good pack usage:
+
+- install `gh` first if your agents open or merge PRs
+- install `kubectl` only where cluster operations are relevant
+- install `terraform` in infra-focused environments rather than everywhere
+
 Examples of commands that may still stay `DIRECT`:
 
 - `git status`
@@ -225,7 +273,9 @@ Examples of commands that may still stay `DIRECT`:
 
 - Keep `NIYAM_EXEC_ALLOWED_ROOTS` tight.
 - Keep wrapper rules explicit rather than broad.
+- Keep `NIYAM_EXEC_DATA_KEY` stable across restarts or pending commands will not decrypt for execution.
 - Use metrics and audit exports for incident review.
+- Use policy simulation for agent preflight and UI previews.
 - Start with dashboard approvals before integrating agents broadly.
 - Run `npm run smoke` after local changes.
 - Run `npm run smoke:wrapper` when changing execution policy behavior.

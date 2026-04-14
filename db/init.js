@@ -8,6 +8,7 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 
 const { config } = require('../config');
+const { runMigrations } = require('./migrations');
 
 const DB_PATH = config.DB_PATH;
 const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
@@ -27,7 +28,7 @@ function initializeDatabase() {
     // Read and execute schema
     const schema = fs.readFileSync(SCHEMA_PATH, 'utf8');
     db.exec(schema);
-    ensureSchemaCompatibility(db);
+    runMigrations(db);
     
     console.log('Database schema initialized');
     
@@ -235,42 +236,3 @@ if (require.main === module) {
 }
 
 module.exports = { initializeDatabase, DB_PATH };
-
-function ensureSchemaCompatibility(db) {
-    const commandColumns = new Set(
-        db.prepare("PRAGMA table_info(commands)").all().map(column => column.name)
-    );
-
-    if (!commandColumns.has('working_dir')) {
-        db.exec('ALTER TABLE commands ADD COLUMN working_dir TEXT');
-    }
-    if (!commandColumns.has('execution_mode')) {
-        db.exec("ALTER TABLE commands ADD COLUMN execution_mode TEXT");
-    }
-
-    const ruleColumns = new Set(
-        db.prepare("PRAGMA table_info(rules)").all().map(column => column.name)
-    );
-    if (!ruleColumns.has('execution_mode')) {
-        db.exec("ALTER TABLE rules ADD COLUMN execution_mode TEXT");
-    }
-
-    const tableNames = new Set(
-        db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map(row => row.name)
-    );
-
-    if (!tableNames.has('sessions')) {
-        db.exec(`
-            CREATE TABLE sessions (
-                id TEXT PRIMARY KEY,
-                token_hash TEXT NOT NULL UNIQUE,
-                identifier TEXT NOT NULL,
-                roles TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                expires_at TEXT NOT NULL,
-                last_seen_at TEXT NOT NULL
-            );
-            CREATE INDEX idx_sessions_expires_at ON sessions(expires_at);
-        `);
-    }
-}

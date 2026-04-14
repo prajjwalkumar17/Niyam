@@ -46,7 +46,7 @@ That lets you keep something like `git merge` as approved but `DIRECT`, while fo
 
 ```bash
 npm install
-NIYAM_ADMIN_PASSWORD=change-me npm start
+NIYAM_ADMIN_PASSWORD=change-me NIYAM_EXEC_DATA_KEY=local-dev-key npm start
 ```
 
 Open `http://localhost:3000` and sign in with:
@@ -58,9 +58,15 @@ Open `http://localhost:3000` and sign in with:
 
 - [Local setup](./docs/local_setup.md)
 - [Usage guide](./docs/usage.md)
+- [Feature guide](./docs/features.md)
 - [API reference](./docs/api_reference.md)
 - [Configuration reference](./docs/configuration.md)
 - [Self-hosted deployment](./docs/deployment.md)
+- [Backup and restore](./docs/backup_restore.md)
+- [Security](./docs/security.md)
+- [Contributing](./docs/contributing.md)
+- [Public release checklist](./docs/public_release.md)
+- [Test report](./docs/test_report.md)
 
 ## Runtime Highlights
 
@@ -68,19 +74,32 @@ Open `http://localhost:3000` and sign in with:
 - dashboard login with persistent sessions
 - bearer-token auth for agents
 - two-person approval support for higher-risk commands
+- server-truth policy simulation before submission
+- built-in rule packs for git, gh, docker, kubectl, and terraform
 - rule-driven `DIRECT` vs `WRAPPER`
 - working-directory confinement
+- storage-time secret redaction with encrypted raw execution payloads
 - structured logs, metrics, and alert hooks
 - smoke tests for both normal and wrapper execution paths
 
 ## Smoke Tests
 
 ```bash
+npm test
 npm run smoke
 npm run smoke:wrapper
 ```
 
 Use `smoke:wrapper` to prove a matching rule sends execution through `WRAPPER` mode while the default remains `DIRECT`.
+
+The smoke tests now also verify:
+
+- policy simulation
+- built-in rule pack install and matching
+- storage-time redaction for submitted secrets
+- redacted command output and audit history
+
+`npm test` runs a live `node:test` suite against a temporary Niyam instance and covers policy simulation, rule-pack install behavior, and secret redaction.
 
 ## Example Policy Shape
 
@@ -91,8 +110,8 @@ Use `smoke:wrapper` to prove a matching rule sends execution through `WRAPPER` m
 
 ## Current Gaps Worth Adding
 
-- policy simulation before submission
-- built-in rule packs for `git`, `gh`, `docker`, `kubectl`, `terraform`
-- secret redaction in command output and audit history
 - versioned migrations and wider automated test coverage
 - multi-admin approval routing for larger teams
+- richer policy simulation diffing such as "why this changed from last run"
+- built-in pack presets for environment-specific workflows
+- stronger secret classifiers and structured policy linting

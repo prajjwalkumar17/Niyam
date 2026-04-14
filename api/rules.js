@@ -5,6 +5,7 @@
 const { v4: uuidv4 } = require('uuid');
 const { validateRule } = require('../policy/rules');
 const { logAudit } = require('./commands');
+const { validateRulePayload, validationError } = require('./validation');
 
 function createRulesRouter(db, broadcast) {
     const router = require('express').Router();
@@ -47,7 +48,11 @@ function createRulesRouter(db, broadcast) {
 
     // Create a new rule
     router.post('/', (req, res) => {
-        const { name, description, rule_type, pattern, risk_level, execution_mode, priority, metadata } = req.body;
+        const bodyValidation = validateRulePayload(req.body);
+        if (!bodyValidation.valid) {
+            return validationError(res, bodyValidation.errors);
+        }
+        const { name, description, rule_type, pattern, risk_level, execution_mode, priority, metadata } = bodyValidation.value;
         
         const validation = validateRule({ name, rule_type, pattern, risk_level, execution_mode });
         if (!validation.valid) {
@@ -88,9 +93,19 @@ function createRulesRouter(db, broadcast) {
             return res.status(404).json({ error: 'Rule not found' });
         }
         
-        const { name, description, rule_type, pattern, risk_level, execution_mode, enabled, priority, metadata } = req.body;
+        const bodyValidation = validateRulePayload(req.body, { partial: true });
+        if (!bodyValidation.valid) {
+            return validationError(res, bodyValidation.errors);
+        }
+        const { name, description, rule_type, pattern, risk_level, execution_mode, enabled, priority, metadata } = bodyValidation.value;
         
-        if (rule_type || pattern) {
+        if (
+            rule_type !== undefined ||
+            pattern !== undefined ||
+            risk_level !== undefined ||
+            execution_mode !== undefined ||
+            name !== undefined
+        ) {
             const validation = validateRule({
                 name: name || existing.name,
                 rule_type: rule_type || existing.rule_type,

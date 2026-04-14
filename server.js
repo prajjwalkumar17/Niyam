@@ -15,6 +15,8 @@ const { createAuth } = require('./auth');
 const { createCommandsRouter } = require('./api/commands');
 const { createApprovalsRouter } = require('./api/approvals');
 const { createRulesRouter } = require('./api/rules');
+const { createRulePacksRouter } = require('./api/rule-packs');
+const { createPolicyRouter } = require('./api/policy');
 const { createAuditRouter } = require('./api/audit');
 const { broadcastManager, broadcast } = require('./ws/broadcast');
 const ExecutionGuard = require('./executor/guard');
@@ -136,7 +138,9 @@ app.get('/api/health', (req, res) => {
 // Authenticated API routes
 app.use('/api/commands', auth.requireAuth, createCommandsRouter(db, broadcast, { onApproved: queueExecution }));
 app.use('/api/approvals', auth.requireAuth, createApprovalsRouter(db, broadcast, { onApproved: queueExecution }));
+app.use('/api/policy', auth.requireAuth, createPolicyRouter(db));
 app.use('/api/rules', auth.requireAdmin, createRulesRouter(db, broadcast));
+app.use('/api/rule-packs', auth.requireAdmin, createRulePacksRouter(db));
 app.use('/api/audit', auth.requireAdmin, createAuditRouter(db));
 
 // Serve static dashboard

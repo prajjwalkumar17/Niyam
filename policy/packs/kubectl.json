@@ -1,0 +1,44 @@
+{
+  "id": "kubectl",
+  "name": "kubectl",
+  "version": "1.0.0",
+  "description": "Baseline governance rules for kubectl reads and cluster mutations.",
+  "rules": [
+    {
+      "pack_rule_id": "kubectl-readonly",
+      "name": "Kubectl Read Operations",
+      "description": "Read-oriented kubectl commands stay low risk.",
+      "rule_type": "pattern",
+      "pattern": "^kubectl\\s+(get|describe|logs)\\b",
+      "risk_level": "LOW",
+      "priority": 210
+    },
+    {
+      "pack_rule_id": "kubectl-medium",
+      "name": "Kubectl Apply and Scale",
+      "description": "Apply and scale actions require approval.",
+      "rule_type": "pattern",
+      "pattern": "^kubectl\\s+(apply|scale|set\\s+image)\\b",
+      "risk_level": "MEDIUM",
+      "priority": 250
+    },
+    {
+      "pack_rule_id": "kubectl-high-risk",
+      "name": "Kubectl High-Risk Commands",
+      "description": "Delete, patch, and rollout restart are high risk.",
+      "rule_type": "pattern",
+      "pattern": "^kubectl\\s+(delete|patch|rollout\\s+restart)\\b",
+      "risk_level": "HIGH",
+      "priority": 340
+    },
+    {
+      "pack_rule_id": "kubectl-wrap-writes",
+      "name": "Wrap Kubectl Write Operations",
+      "description": "Force cluster-impacting writes into wrapper mode.",
+      "rule_type": "execution_mode",
+      "pattern": "^kubectl\\s+(apply|delete|patch|rollout\\s+restart)\\b",
+      "execution_mode": "WRAPPER",
+      "priority": 440
+    }
+  ]
+}

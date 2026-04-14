@@ -1,0 +1,44 @@
+{
+  "id": "gh",
+  "name": "GitHub CLI",
+  "version": "1.0.0",
+  "description": "Baseline governance rules for GitHub CLI workflows, merges, and secrets.",
+  "rules": [
+    {
+      "pack_rule_id": "gh-readonly",
+      "name": "GitHub Read Operations",
+      "description": "Read-oriented gh commands stay low risk.",
+      "rule_type": "pattern",
+      "pattern": "^gh\\s+(pr\\s+(view|list|checks)|repo\\s+(view|list)|workflow\\s+(view|list)|issue\\s+(view|list))\\b",
+      "risk_level": "LOW",
+      "priority": 210
+    },
+    {
+      "pack_rule_id": "gh-medium-mutations",
+      "name": "GitHub Medium Mutations",
+      "description": "PR creation and issue closure require approval.",
+      "rule_type": "pattern",
+      "pattern": "^gh\\s+(pr\\s+create|issue\\s+close)\\b",
+      "risk_level": "MEDIUM",
+      "priority": 230
+    },
+    {
+      "pack_rule_id": "gh-high-risk",
+      "name": "GitHub High-Risk Mutations",
+      "description": "Workflow runs, merges, and secrets are high risk.",
+      "rule_type": "pattern",
+      "pattern": "^gh\\s+(pr\\s+merge|workflow\\s+(run|dispatch)|secret\\s+set|secrets\\s+set)\\b",
+      "risk_level": "HIGH",
+      "priority": 320
+    },
+    {
+      "pack_rule_id": "gh-wrap-secrets-and-workflows",
+      "name": "Wrap Workflow and Secret Commands",
+      "description": "Force workflow dispatch and secret changes through wrapper mode.",
+      "rule_type": "execution_mode",
+      "pattern": "^gh\\s+(workflow\\s+(run|dispatch)|secret\\s+set|secrets\\s+set)\\b",
+      "execution_mode": "WRAPPER",
+      "priority": 420
+    }
+  ]
+}

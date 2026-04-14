@@ -7,6 +7,8 @@ const path = require('path');
 const { spawn } = require('child_process');
 const { logAudit } = require('../api/commands');
 const { config } = require('../config');
+const { decryptJson } = require('../security/crypto');
+const { buildRedactionSummary, redactExecutionOutput } = require('../security/redaction');
 const { logger, metrics } = require('../observability');
 
 class CommandRunner {
@@ -55,6 +57,10 @@ class CommandRunner {
         
         try {
             const result = await this._runCommand(cmd);
+            const combinedRedactionSummary = buildRedactionSummary(
+                parseJson(cmd.redaction_summary, {}),
+                result.redactionSummary
+            );
             
             // Update with result
             const now = new Date().toISOString();
@@ -65,9 +71,20 @@ class CommandRunner {
                     error = ?,
                     exit_code = ?,
                     executed_at = ?,
-                    updated_at = ?
+                    updated_at = ?,
+                    redaction_summary = ?,
+                    redacted = ?
                 WHERE id = ?
-            `).run(result.stdout || '', result.stderr || null, result.exitCode, now, now, commandId);
+            `).run(
+                result.stdout || '',
+                result.stderr || null,
+                result.exitCode,
+                now,
+                now,
+                JSON.stringify(combinedRedactionSummary),
+                hasRedaction(combinedRedactionSummary) ? 1 : 0,
+                commandId
+            );
             
             logAudit(this.db, 'command_executed', 'command', commandId, 'system', {
                 exitCode: result.exitCode,
@@ -104,6 +121,10 @@ class CommandRunner {
             };
             
         } catch (error) {
+            const combinedRedactionSummary = buildRedactionSummary(
+                parseJson(cmd.redaction_summary, {}),
+                error.redactionSummary
+            );
             const now = new Date().toISOString();
             this.db.prepare(`
                 UPDATE commands SET 
@@ -112,9 +133,20 @@ class CommandRunner {
                     error = ?, 
                     exit_code = ?,
                     executed_at = ?,
-                    updated_at = ?
+                    updated_at = ?,
+                    redaction_summary = ?,
+                    redacted = ?
                 WHERE id = ?
-            `).run(error.stdout || '', error.stderr || error.message, error.exitCode || 1, now, now, commandId);
+            `).run(
+                error.stdout || '',
+                error.stderr || error.message,
+                error.exitCode || 1,
+                now,
+                now,
+                JSON.stringify(combinedRedactionSummary),
+                hasRedaction(combinedRedactionSummary) ? 1 : 0,
+                commandId
+            );
             
             logAudit(this.db, 'command_failed', 'command', commandId, 'system', {
                 error: error.message,
@@ -160,7 +192,13 @@ class CommandRunner {
      */
     _runCommand(cmd) {
         return new Promise((resolve, reject) => {
-            const { file, args } = this._resolveCommand(cmd.command, cmd.args);
+            const rawCommand = cmd.exec_command
+                ? decryptJson(cmd.exec_command, config.EXEC_DATA_KEY)
+                : cmd.command;
+            const rawArgs = cmd.exec_args
+                ? decryptJson(cmd.exec_args, config.EXEC_DATA_KEY)
+                : parseJson(cmd.args, []);
+            const { file, args } = this._resolveCommand(rawCommand, rawArgs);
             const cwd = this._resolveWorkingDirectory(cmd.working_dir);
             const executionMode = String(cmd.execution_mode || config.EXEC_DEFAULT_MODE).toUpperCase();
             const spawnPlan = this._buildSpawnPlan(file, args, executionMode);
@@ -188,8 +226,10 @@ class CommandRunner {
                 clearTimeout(timeoutHandle);
                 const wrapped = new Error(`Failed to start command: ${error.message}`);
                 wrapped.exitCode = 1;
-                wrapped.stdout = stdout;
-                wrapped.stderr = stderr;
+                const outputRedaction = redactExecutionOutput({ stdout, stderr });
+                wrapped.stdout = outputRedaction.stdout;
+                wrapped.stderr = outputRedaction.stderr;
+                wrapped.redactionSummary = outputRedaction.summary;
                 reject(wrapped);
             });
 
@@ -217,8 +257,10 @@ class CommandRunner {
                 if (outputLimitExceeded) {
                     const error = new Error(`Command output exceeded ${config.EXEC_OUTPUT_LIMIT_BYTES} bytes`);
                     error.exitCode = exitCode || 1;
-                    error.stdout = stdout;
-                    error.stderr = stderr;
+                    const outputRedaction = redactExecutionOutput({ stdout, stderr });
+                    error.stdout = outputRedaction.stdout;
+                    error.stderr = outputRedaction.stderr;
+                    error.redactionSummary = outputRedaction.summary;
                     reject(error);
                     return;
                 }
@@ -226,25 +268,31 @@ class CommandRunner {
                 if (timedOut) {
                     const error = new Error(`Command timed out after ${config.EXEC_TIMEOUT_MS}ms`);
                     error.exitCode = exitCode || 124;
-                    error.stdout = stdout;
-                    error.stderr = stderr;
+                    const outputRedaction = redactExecutionOutput({ stdout, stderr });
+                    error.stdout = outputRedaction.stdout;
+                    error.stderr = outputRedaction.stderr;
+                    error.redactionSummary = outputRedaction.summary;
                     reject(error);
                     return;
                 }
 
                 if (exitCode !== 0) {
-                    const error = new Error(stderr || `Command exited with code ${exitCode}`);
+                    const outputRedaction = redactExecutionOutput({ stdout, stderr });
+                    const error = new Error(outputRedaction.stderr || `Command exited with code ${exitCode}`);
                     error.exitCode = exitCode || 1;
-                    error.stdout = stdout;
-                    error.stderr = stderr;
+                    error.stdout = outputRedaction.stdout;
+                    error.stderr = outputRedaction.stderr;
+                    error.redactionSummary = outputRedaction.summary;
                     reject(error);
                     return;
                 }
 
+                const outputRedaction = redactExecutionOutput({ stdout, stderr });
                 resolve({
                     exitCode: exitCode || 0,
-                    stdout,
-                    stderr
+                    stdout: outputRedaction.stdout,
+                    stderr: outputRedaction.stderr,
+                    redactionSummary: outputRedaction.summary
                 });
             });
         });
@@ -356,6 +404,36 @@ class CommandRunner {
 }
 
 module.exports = CommandRunner;
+
+function parseJson(value, fallback) {
+    if (value === null || value === undefined || value === '') {
+        return fallback;
+    }
+
+    if (Array.isArray(value)) {
+        return value;
+    }
+
+    try {
+        return JSON.parse(value);
+    } catch (error) {
+        return fallback;
+    }
+}
+
+function hasRedaction(summary) {
+    return Boolean(
+        summary &&
+        (
+            summary.command ||
+            summary.args ||
+            summary.metadata ||
+            summary.output ||
+            summary.error ||
+            (Array.isArray(summary.metadataPaths) && summary.metadataPaths.length > 0)
+        )
+    );
+}
 
 function appendOutput(current, chunk) {
     const chunkText = String(chunk);

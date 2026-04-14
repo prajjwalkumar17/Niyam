@@ -67,7 +67,10 @@ async function loadHistoryPage() {
         
         tbody.innerHTML = data.commands.map(cmd => `
             <tr class="fade-in">
-                <td><code style="color:var(--accent-cyan);font-size:12px">${escapeHtml(cmd.command)}</code></td>
+                <td>
+                    <code style="color:var(--accent-cyan);font-size:12px">${escapeHtml(cmd.command)}</code>
+                    ${cmd.redacted ? '<span class="status-badge rejected" style="margin-left:8px">Redacted</span>' : ''}
+                </td>
                 <td><span class="risk-badge ${cmd.risk_level.toLowerCase()}">${cmd.risk_level}</span></td>
                 <td><span class="status-badge ${cmd.status}">${cmd.status}</span></td>
                 <td>${escapeHtml(cmd.requester)}</td>
@@ -93,6 +96,7 @@ async function showCommandDetail(commandId) {
         const detailHtml = `
             <div style="background:var(--bg-input);border:1px solid var(--border-color);border-radius:8px;padding:16px;margin-bottom:16px">
                 <div style="margin-bottom:8px"><strong>Command:</strong> <code style="color:var(--accent-cyan)">${escapeHtml(cmd.command)}</code></div>
+                ${cmd.redacted ? '<div style="margin-bottom:8px"><span class="status-badge rejected">Redacted</span> <span class="text-sm text-muted">Sensitive values were removed before storage.</span></div>' : ''}
                 <div style="margin-bottom:8px"><strong>Risk:</strong> <span class="risk-badge ${cmd.risk_level.toLowerCase()}">${cmd.risk_level}</span></div>
                 <div style="margin-bottom:8px"><strong>Status:</strong> <span class="status-badge ${cmd.status}">${cmd.status}</span></div>
                 <div style="margin-bottom:8px"><strong>Requester:</strong> ${escapeHtml(cmd.requester)}</div>

@@ -92,6 +92,7 @@ Notes:
 - `args` should be an array
 - `workingDir` is optional but may be required by your execution policy
 - matching policy determines `riskLevel`, approvals, and `executionMode`
+- stored history fields are redacted before persistence; raw execution payloads are encrypted separately
 
 Example:
 
@@ -154,6 +155,41 @@ Lists approval records.
 
 Returns approvals for a specific command.
 
+### `POST /api/policy/simulate`
+
+Runs policy evaluation without creating a command row.
+
+Body:
+
+```json
+{
+  "command": "gh",
+  "args": ["workflow", "run", "build.yml"],
+  "workingDir": "/repo/path",
+  "metadata": {
+    "source": "dashboard-preview"
+  }
+}
+```
+
+Use this endpoint to:
+
+- preflight a command before submission
+- inspect `riskLevel`, `executionMode`, and approval requirements
+- see which rules matched
+- preview whether redaction would mask any values
+
+Typical response fields:
+
+- `allowed`
+- `reason`
+- `riskLevel`
+- `executionMode`
+- `threshold`
+- `matchedRules`
+- `classifier`
+- `redactionPreview`
+
 ## Admin Routes
 
 These routes require an authenticated admin session.
@@ -178,6 +214,26 @@ Query params:
 ### `GET /api/rules/:id`
 
 Returns a single rule.
+
+### `GET /api/rule-packs`
+
+Lists curated built-in rule packs with install status.
+
+### `GET /api/rule-packs/:packId`
+
+Returns a pack definition and its rules.
+
+### `POST /api/rule-packs/:packId/install`
+
+Installs a built-in pack into the `rules` table.
+
+### `POST /api/rule-packs/:packId/upgrade-preview`
+
+Shows which pack-managed rules are new, unchanged, locally modified, or upgradable.
+
+### `POST /api/rule-packs/:packId/upgrade`
+
+Applies non-conflicting pack upgrades and leaves locally modified rules untouched.
 
 ### `POST /api/rules`
 
@@ -266,5 +322,7 @@ Common command fields include:
 - `timeout_at`
 - `exit_code`
 - `output`
+- `redacted`
+- `redaction_summary`
 
 Field naming varies slightly between stored rows and shaped API responses. If you are building a client, normalize both snake_case and camelCase forms.

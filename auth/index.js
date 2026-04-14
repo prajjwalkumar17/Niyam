@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 
 const { config } = require('../config');
+const { validateLoginBody, validationError } = require('../api/validation');
 
 function parseCookies(cookieHeader) {
     return String(cookieHeader || '')
@@ -167,7 +168,11 @@ function createAuth(db) {
         const router = require('express').Router();
 
         router.post('/login', (req, res) => {
-            const { username, password } = req.body || {};
+            const validation = validateLoginBody(req.body);
+            if (!validation.valid) {
+                return validationError(res, validation.errors);
+            }
+            const { username, password } = validation.value;
 
             if (username !== config.ADMIN_USERNAME || password !== config.ADMIN_PASSWORD) {
                 return res.status(401).json({ error: 'Invalid credentials' });

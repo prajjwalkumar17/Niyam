@@ -30,6 +30,9 @@ function renderAudit(container) {
                 <option value="rule_created">Rule Created</option>
                 <option value="rule_updated">Rule Updated</option>
                 <option value="rule_deleted">Rule Deleted</option>
+                <option value="rule_pack_installed">Rule Pack Installed</option>
+                <option value="rule_pack_upgrade_previewed">Rule Pack Upgrade Previewed</option>
+                <option value="rule_pack_upgraded">Rule Pack Upgraded</option>
             </select>
             <input type="text" class="form-input" id="audit-actor-filter" placeholder="Filter by actor..." style="width:180px">
             <input type="date" class="form-input" id="audit-start-date" title="Start date" style="width:150px">
@@ -187,6 +190,10 @@ async function loadAuditLog() {
             rule_created: { icon: '📝', class: '' },
             rule_updated: { icon: '✏️', class: '' },
             rule_deleted: { icon: '🗑️', class: 'event-rejected' }
+            ,
+            rule_pack_installed: { icon: '📦', class: '' },
+            rule_pack_upgrade_previewed: { icon: '🧪', class: '' },
+            rule_pack_upgraded: { icon: '⬆️', class: '' }
         };
         
         timeline.innerHTML = data.entries.map(entry => {
@@ -199,6 +206,7 @@ async function loadAuditLog() {
                     <div class="timeline-title">
                         ${config.icon} ${formatEventType(entry.event_type)}
                         ${entry.entity_type ? `<span class="text-muted" style="font-weight:400">· ${entry.entity_type}</span>` : ''}
+                        ${entry.redacted ? `<span class="status-badge rejected" style="margin-left:8px">Redacted</span>` : ''}
                     </div>
                     <div class="timeline-details">
                         <div><strong>Actor:</strong> ${escapeHtml(entry.actor)}</div>
@@ -255,6 +263,10 @@ function formatAuditDetails(entry) {
     
     if (details.exit_code !== undefined) {
         html += `<div><strong>Exit Code:</strong> ${details.exit_code}</div>`;
+    }
+
+    if (entry.redacted) {
+        html += `<div><strong>Redaction:</strong> Sensitive values were removed before storage.</div>`;
     }
     
     return html;

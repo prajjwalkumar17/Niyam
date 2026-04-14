@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
+    "test": "node --test",
     "init-db": "node db/init.js",
     "smoke": "sh scripts/smoke.sh",
     "smoke:wrapper": "NIYAM_SMOKE_WRAPPER_TEST=1 sh scripts/smoke.sh",

@@ -47,6 +47,8 @@ function createAuditRouter(db) {
         const entries = db.prepare(query).all(...params);
         entries.forEach(e => {
             e.details = JSON.parse(e.details || '{}');
+            e.redaction_summary = JSON.parse(e.redaction_summary || '{}');
+            e.redacted = Boolean(e.redacted);
         });
         
         res.json({
@@ -105,6 +107,8 @@ function createAuditRouter(db) {
         const entries = db.prepare(query).all(...params);
         entries.forEach(e => {
             e.details = JSON.parse(e.details || '{}');
+            e.redaction_summary = JSON.parse(e.redaction_summary || '{}');
+            e.redacted = Boolean(e.redacted);
         });
         
         if (format === 'csv') {

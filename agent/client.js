@@ -30,6 +30,21 @@ class AgentClient {
     }
 
     /**
+     * Simulate a command before submission.
+     * @param {string} command - The command to evaluate
+     * @param {Array} args - Command arguments
+     * @param {Object} metadata - Additional metadata
+     * @returns {Promise<Object>} Simulation result
+     */
+    async simulateCommand(command, args = [], metadata = {}) {
+        return this._request('POST', '/api/policy/simulate', {
+            command,
+            args,
+            metadata
+        });
+    }
+
+    /**
      * Get command status
      * @param {string} commandId - Command ID
      * @returns {Promise<Object>} Command status

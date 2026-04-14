@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 
 const { config } = require('../config');
+const { redactStructuredData } = require('../security/redaction');
 
 const LEVELS = {
     debug: 10,
@@ -41,7 +42,7 @@ class Logger {
             event,
             service: 'niyam',
             env: config.NODE_ENV,
-            ...fields
+            ...redactStructuredData(fields)
         };
         const line = JSON.stringify(entry);
 

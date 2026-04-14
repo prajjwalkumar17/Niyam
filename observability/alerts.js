@@ -4,6 +4,7 @@ const https = require('https');
 const { config } = require('../config');
 const { logger } = require('./logger');
 const { metrics } = require('./metrics');
+const { redactStructuredData } = require('../security/redaction');
 
 const SEVERITY_RANK = {
     info: 10,
@@ -29,13 +30,14 @@ function sendAlert({ event, severity = 'error', message, details = {} }) {
         return;
     }
 
+    const safeDetails = redactStructuredData(details);
     const payload = JSON.stringify({
         service: 'niyam',
         env: config.NODE_ENV,
         event,
         severity,
         message,
-        details,
+        details: safeDetails,
         timestamp: new Date().toISOString()
     });
 

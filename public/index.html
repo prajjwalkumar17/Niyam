@@ -110,8 +110,13 @@
                     <input type="text" id="cmd-working-dir" class="form-input" placeholder="Optional absolute path">
                 </div>
                 <div class="risk-preview" id="risk-preview" style="display:none">
-                    <span class="risk-label" id="risk-preview-label">RISK</span>
-                    <span class="risk-text" id="risk-preview-text"></span>
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                        <span class="risk-label" id="risk-preview-label">RISK</span>
+                        <span class="status-badge" id="execution-preview-badge">DIRECT</span>
+                        <span class="risk-text" id="risk-preview-text"></span>
+                    </div>
+                    <div class="text-sm text-muted" id="risk-preview-extra" style="margin-top:8px"></div>
+                    <div class="text-sm text-muted" id="risk-preview-rules" style="margin-top:6px"></div>
                 </div>
             </div>
             <div class="modal-footer">

@@ -6,6 +6,7 @@ This document lists the main environment variables used by Niyam.
 
 - `NODE_ENV=production`
 - `NIYAM_ADMIN_PASSWORD=<strong password>`
+- `NIYAM_EXEC_DATA_KEY=<stable encryption key>`
 
 ## Core Runtime
 
@@ -42,6 +43,7 @@ export NIYAM_AGENT_TOKENS='{"forger":"dev-token","reviewer":"another-token"}'
 
 - `NIYAM_EXEC_DEFAULT_MODE`
 - `NIYAM_EXEC_WRAPPER`
+- `NIYAM_EXEC_DATA_KEY`
 - `NIYAM_EXEC_ALLOWED_ROOTS`
 - `NIYAM_EXEC_REQUIRE_ALLOWED_ROOT`
 - `NIYAM_EXEC_TIMEOUT_MS`
@@ -58,6 +60,10 @@ Supported values:
 `NIYAM_EXEC_DEFAULT_MODE` is the fallback mode when no `execution_mode` rule matches.
 
 `NIYAM_EXEC_WRAPPER` should be a JSON array.
+
+`NIYAM_EXEC_DATA_KEY` is required when redaction is enabled. Niyam uses it to encrypt raw execution payloads while storing only redacted display fields.
+
+Keep this value stable for a given deployment. If you rotate it without migrating stored pending commands, previously encrypted execution payloads will no longer decrypt.
 
 Example:
 
@@ -86,6 +92,21 @@ Keep this tight. It is one of the main host-safety controls in Niyam.
 - `NIYAM_ALERT_EVENTS`
 - `NIYAM_ALERT_TIMEOUT_MS`
 
+## Redaction
+
+- `NIYAM_REDACTION_ENABLED`
+- `NIYAM_REDACTION_REPLACEMENT`
+- `NIYAM_REDACTION_EXTRA_KEYS`
+- `NIYAM_REDACTION_DISABLE_HEURISTICS`
+
+Redaction defaults to enabled. When enabled, command history, audit history, logs, and exports store sanitized values while raw execution payloads are encrypted with `NIYAM_EXEC_DATA_KEY`.
+
+This means:
+
+- operators can inspect history without exposing raw secrets
+- agents still execute the original intended command after approval
+- the encryption key becomes part of your deployment's operational secrets
+
 ## Recommended Production Baseline
 
 ```bash
@@ -98,6 +119,7 @@ export NIYAM_ALLOWED_ORIGINS='https://niyam.example.com'
 export NIYAM_EXEC_ALLOWED_ROOTS=/srv/repos,/opt/niyam
 export NIYAM_EXEC_DEFAULT_MODE=DIRECT
 export NIYAM_EXEC_WRAPPER='["bwrap","--unshare-all","--"]'
+export NIYAM_EXEC_DATA_KEY='replace-with-a-long-random-secret'
 export NIYAM_METRICS_TOKEN='replace-me'
 ```
 

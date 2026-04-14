@@ -13,7 +13,9 @@ const state = {
     currentPageRenderer: null,
     refreshInterval: null,
     timerInterval: null,
-    autoRefreshEnabled: localStorage.getItem('niyam.autoRefresh') !== 'off'
+    autoRefreshEnabled: localStorage.getItem('niyam.autoRefresh') !== 'off',
+    previewTimer: null,
+    previewSequence: 0
 };
 
 // API Base URL
@@ -583,11 +585,10 @@ function initSubmitModal() {
         document.getElementById('cmd-requester').value = state.principal.identifier;
         document.getElementById('submit-modal').style.display = 'flex';
     });
-    
-    // Live risk preview
-    document.getElementById('cmd-input').addEventListener('input', (e) => {
-        previewRisk(e.target.value);
-    });
+
+    document.getElementById('cmd-input').addEventListener('input', schedulePolicyPreview);
+    document.getElementById('cmd-args').addEventListener('input', schedulePolicyPreview);
+    document.getElementById('cmd-working-dir').addEventListener('input', schedulePolicyPreview);
 }
 
 function closeModal() {
@@ -596,41 +597,126 @@ function closeModal() {
     document.getElementById('cmd-args').value = '';
     document.getElementById('cmd-timeout').value = '';
     document.getElementById('cmd-working-dir').value = '';
-    document.getElementById('risk-preview').style.display = 'none';
+    hidePolicyPreview();
 }
 
-function previewRisk(command) {
+function hidePolicyPreview() {
+    if (state.previewTimer) {
+        clearTimeout(state.previewTimer);
+        state.previewTimer = null;
+    }
+
+    document.getElementById('risk-preview').style.display = 'none';
+    document.getElementById('risk-preview-text').textContent = '';
+    document.getElementById('risk-preview-extra').textContent = '';
+    document.getElementById('risk-preview-rules').textContent = '';
+}
+
+function schedulePolicyPreview() {
+    if (state.previewTimer) {
+        clearTimeout(state.previewTimer);
+    }
+
+    const command = document.getElementById('cmd-input').value.trim();
+    if (!command) {
+        hidePolicyPreview();
+        return;
+    }
+
+    state.previewTimer = setTimeout(() => {
+        previewPolicy();
+    }, 300);
+}
+
+async function previewPolicy() {
+    const command = document.getElementById('cmd-input').value.trim();
+    const args = parseArgsInput(document.getElementById('cmd-args').value.trim());
+    const workingDir = document.getElementById('cmd-working-dir').value.trim();
     const preview = document.getElementById('risk-preview');
     const label = document.getElementById('risk-preview-label');
     const text = document.getElementById('risk-preview-text');
-    
-    if (!command.trim()) {
-        preview.style.display = 'none';
+    const extra = document.getElementById('risk-preview-extra');
+    const rules = document.getElementById('risk-preview-rules');
+    const executionBadge = document.getElementById('execution-preview-badge');
+
+    if (!command) {
+        hidePolicyPreview();
         return;
     }
-    
-    const risk = classifyRiskLocal(command);
-    preview.style.display = 'flex';
-    label.className = `risk-label ${risk.level.toLowerCase()}`;
-    label.textContent = risk.level;
-    text.textContent = risk.description;
-}
 
-function classifyRiskLocal(command) {
-    const highPatterns = [/pr\s+merge/i, /push\s+.*--force/i, /branch\s+delete/i, /repo\s+delete/i, /workflow\s+run/i, /secret\s+set/i];
-    const medPatterns = [/pr\s+create/i, /issue\s+close/i, /branch\s+create/i, /repo\s+edit/i];
-    const lowPatterns = [/pr\s+view/i, /issue\s+view/i, /repo\s+view/i, /branch\s+list/i, /workflow\s+list/i];
-    
-    for (const p of highPatterns) {
-        if (p.test(command)) return { level: 'HIGH', description: 'Requires 2 approvers + rationale' };
+    const sequence = ++state.previewSequence;
+    preview.style.display = 'flex';
+    label.className = 'risk-label';
+    label.textContent = '...';
+    executionBadge.className = 'status-badge';
+    executionBadge.textContent = '...';
+    text.textContent = 'Simulating policy...';
+    extra.textContent = '';
+    rules.textContent = '';
+
+    try {
+        const response = await apiFetch('/policy/simulate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                command,
+                args,
+                workingDir: workingDir || null,
+                metadata: { source: 'dashboard-preview' }
+            })
+        });
+        const result = await response.json();
+
+        if (sequence !== state.previewSequence) {
+            return;
+        }
+
+        if (!response.ok) {
+            throw new Error(result.error || 'Simulation failed');
+        }
+
+        label.className = `risk-label ${String(result.riskLevel || 'MEDIUM').toLowerCase()}`;
+        label.textContent = result.riskLevel || 'MEDIUM';
+        executionBadge.className = `status-badge ${String(result.executionMode || 'DIRECT').toLowerCase() === 'wrapper' ? 'executing' : 'approved'}`;
+        executionBadge.textContent = result.executionMode || 'DIRECT';
+        text.textContent = result.reason || 'Policy evaluated';
+
+        const approvalBits = [];
+        if (!result.allowed) {
+            approvalBits.push('Blocked by policy');
+        } else if (result.autoApproved) {
+            approvalBits.push('Auto-approved');
+        } else {
+            approvalBits.push(`${result.threshold?.requiredApprovals || 0} approval(s) required`);
+        }
+        if (result.threshold?.rationaleRequired) {
+            approvalBits.push('Rationale required');
+        }
+        if (result.redactionPreview?.commandChanged || result.redactionPreview?.argsChanged || result.redactionPreview?.metadataChanged) {
+            approvalBits.push('Sensitive values will be redacted');
+        }
+        extra.textContent = approvalBits.join(' · ');
+
+        const matchedRules = Array.isArray(result.matchedRules) ? result.matchedRules.map(rule => rule.name) : [];
+        if (matchedRules.length > 0) {
+            rules.textContent = `Matched rules: ${matchedRules.join(', ')}`;
+        } else if (result.classifier?.source) {
+            rules.textContent = `Classifier: ${result.classifier.source}`;
+        } else {
+            rules.textContent = '';
+        }
+    } catch (error) {
+        if (sequence !== state.previewSequence) {
+            return;
+        }
+        label.className = 'risk-label medium';
+        label.textContent = 'ERR';
+        executionBadge.className = 'status-badge rejected';
+        executionBadge.textContent = 'N/A';
+        text.textContent = 'Policy simulation unavailable';
+        extra.textContent = error.message || 'Failed to evaluate command policy';
+        rules.textContent = '';
     }
-    for (const p of medPatterns) {
-        if (p.test(command)) return { level: 'MEDIUM', description: 'Requires 1 approver' };
-    }
-    for (const p of lowPatterns) {
-        if (p.test(command)) return { level: 'LOW', description: 'Auto-approved' };
-    }
-    return { level: 'MEDIUM', description: 'Default classification (no pattern match)' };
 }
 
 async function submitCommand() {
@@ -644,7 +730,7 @@ async function submitCommand() {
         return;
     }
     
-    const args = argsStr ? argsStr.split(',').map(a => a.trim()) : [];
+    const args = parseArgsInput(argsStr);
     
     const body = { command, args };
     if (timeoutHours) {
@@ -760,4 +846,8 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+function parseArgsInput(argsStr) {
+    return argsStr ? argsStr.split(',').map(arg => arg.trim()).filter(Boolean) : [];
 }

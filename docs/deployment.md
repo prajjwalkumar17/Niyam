@@ -52,6 +52,7 @@ Recommended production values:
 - `NIYAM_DATA_DIR` and `NIYAM_DB` outside the repo
 - strict `NIYAM_EXEC_ALLOWED_ROOTS`
 - metrics token enabled
+- stable `NIYAM_EXEC_DATA_KEY`
 - `NIYAM_EXEC_WRAPPER` configured if any rules resolve to `WRAPPER`
 
 ## systemd
@@ -65,6 +66,12 @@ The important parts are:
 - writable data path for `/var/lib/niyam`
 - hardened service options such as `NoNewPrivileges=true`
 
+Make sure your environment file also includes:
+
+- `NIYAM_EXEC_DATA_KEY`
+- `NIYAM_AGENT_TOKENS`
+- `NIYAM_METRICS_TOKEN`
+
 ## Reverse Proxy
 
 Use [../deploy/Caddyfile.template](../deploy/Caddyfile.template) as the starting point.
@@ -77,11 +84,36 @@ Niyam should sit behind TLS in production.
 - keep runtime data outside the repository
 - lock down `NIYAM_ALLOWED_ORIGINS`
 - keep `NIYAM_EXEC_ALLOWED_ROOTS` narrow
+- set and protect `NIYAM_EXEC_DATA_KEY`
 - configure a real wrapper if any policy resolves to `WRAPPER`
 - protect the host with normal OS controls, not just Niyam policy
 - enable metrics and hook alerts into your operational channel
 - run `npm run smoke`
 - run `npm run smoke:wrapper` if wrapper mode is enabled
+
+The smoke suite now also verifies:
+
+- policy simulation
+- built-in rule pack install and matching
+- secret redaction in stored command and audit data
+
+## Migrations
+
+Niyam now records versioned schema migrations in the `schema_migrations` table.
+
+On startup:
+
+- the latest schema is applied for fresh installs
+- tracked migrations are applied for older databases
+- applied migration ids are recorded for auditability
+
+Current migrations cover:
+
+- execution mode and session compatibility
+- redaction storage fields
+- pack metadata fields
+
+You should still back up the database before upgrading between releases.
 
 ## Notes On Isolation
 
