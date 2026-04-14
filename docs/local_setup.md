@@ -1,6 +1,12 @@
 # Local Setup
 
-This guide is for running Niyam locally as a developer.
+Use this guide to run Niyam locally for development and testing.
+
+Related docs:
+
+- [Usage guide](./usage.md)
+- [API reference](./api_reference.md)
+- [Configuration reference](./configuration.md)
 
 ## Prerequisites
 
@@ -27,7 +33,7 @@ npm install better-sqlite3@^12.9.0 --build-from-source
 NIYAM_ADMIN_PASSWORD=change-me npm start
 ```
 
-Default local URL:
+Default local URLs:
 
 - Dashboard: [http://localhost:3000](http://localhost:3000)
 - Health: [http://localhost:3000/api/health](http://localhost:3000/api/health)

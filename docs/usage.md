@@ -1,6 +1,13 @@
 # Usage
 
-This guide covers how to use Niyam once it is running.
+This guide covers how teams use Niyam once it is running.
+
+Related docs:
+
+- [Local setup](./local_setup.md)
+- [API reference](./api_reference.md)
+- [Configuration reference](./configuration.md)
+- [Self-hosted deployment](./deployment.md)
 
 ## Who Uses Niyam
 
@@ -107,6 +114,8 @@ Use it to:
 - inspect operational history
 
 ## API Usage
+
+For the full route list and auth details, see [API reference](./api_reference.md).
 
 ### Login As Admin
 
