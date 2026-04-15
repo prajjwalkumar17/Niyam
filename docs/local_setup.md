@@ -37,17 +37,16 @@ Choose `Local development` and let it generate the env file for you.
 - `npm`
 - a working native build toolchain for `better-sqlite3`
 
-Platform notes:
+## Platform Setup
 
-- macOS: install Xcode Command Line Tools if native modules fail to build
-- Linux: make sure `build-essential` or the equivalent compiler toolchain is installed
-- Windows: use either `PowerShell` with Visual Studio Build Tools, or use `WSL` if you want the smoothest native-module experience
+Click the platform you are using.
 
-## Windows Setup
+<details>
+<summary>Windows</summary>
 
 Windows users have two good paths.
 
-### Option 1: WSL Recommended
+**Option 1: WSL recommended**
 
 This is the easiest path if you want the repo to behave like the Linux/macOS setup.
 
@@ -62,7 +61,7 @@ Why this is recommended:
 - shell commands in this doc work as-is
 - wrapper and smoke tooling behaves more consistently
 
-### Option 2: Native Windows with PowerShell
+**Option 2: Native Windows with PowerShell**
 
 Install:
 
@@ -83,6 +82,61 @@ npm install better-sqlite3@^12.9.0 --build-from-source
 ```
 
 If you use PowerShell, prefer `curl.exe` instead of `curl`, because `curl` may map to `Invoke-WebRequest`.
+
+</details>
+
+<details>
+<summary>macOS</summary>
+
+Install:
+
+- [Node.js](https://nodejs.org/)
+- Xcode Command Line Tools
+
+If the native SQLite module needs compiler tools, run:
+
+```bash
+xcode-select --install
+```
+
+Then:
+
+```bash
+npm install
+```
+
+If `better-sqlite3` still fails:
+
+```bash
+npm install better-sqlite3@^12.9.0 --build-from-source
+```
+
+</details>
+
+<details>
+<summary>Linux</summary>
+
+Install:
+
+- [Node.js](https://nodejs.org/)
+- a native build toolchain such as `build-essential`
+- Python if your distro requires it for native Node builds
+
+Ubuntu or Debian example:
+
+```bash
+sudo apt update
+sudo apt install -y build-essential python3
+npm install
+```
+
+If `better-sqlite3` still fails:
+
+```bash
+npm install better-sqlite3@^12.9.0 --build-from-source
+```
+
+</details>
 
 ## Install Dependencies
 
