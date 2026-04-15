@@ -1,0 +1,17 @@
+[Unit]
+Description=Niyam automated backup job
+After=network.target
+
+[Service]
+Type=oneshot
+User=__RUN_USER__
+Group=__RUN_GROUP__
+WorkingDirectory=__INSTALL_DIR__
+EnvironmentFile=__INSTALL_DIR__/.env.production
+ExecStart=__NODE_BIN__ scripts/backup.js
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=__DATA_DIR__
+PrivateTmp=true
+

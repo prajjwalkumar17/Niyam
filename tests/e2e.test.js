@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const os = require('node:os');
 const fsPromises = require('node:fs/promises');
+const fs = require('node:fs');
 const { spawn } = require('node:child_process');
 const Database = require('better-sqlite3');
 
@@ -12,44 +13,22 @@ let serverProcess;
 let baseUrl;
 let adminCookie = '';
 let dataDir = '';
+let tempRoot = '';
 let port = 0;
+let currentExecKey = 'test-exec-key';
 
 test.before(async () => {
-    const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'niyam-test-'));
+    tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'niyam-test-'));
     dataDir = path.join(tempRoot, 'data');
     await fsPromises.mkdir(dataDir, { recursive: true });
     port = 3600 + Math.floor(Math.random() * 400);
     baseUrl = `http://127.0.0.1:${port}`;
 
-    serverProcess = spawn(process.execPath, ['server.js'], {
-        cwd: ROOT_DIR,
-        env: {
-            ...process.env,
-            NIYAM_PORT: String(port),
-            NIYAM_ADMIN_PASSWORD: 'admin',
-            NIYAM_METRICS_TOKEN: 'metrics-secret',
-            NIYAM_AGENT_TOKENS: JSON.stringify({ forger: 'dev-token' }),
-            NIYAM_EXEC_ALLOWED_ROOTS: ROOT_DIR,
-            NIYAM_EXEC_DEFAULT_MODE: 'DIRECT',
-            NIYAM_EXEC_WRAPPER: '["/usr/bin/env"]',
-            NIYAM_EXEC_DATA_KEY: 'test-exec-key',
-            NIYAM_DATA_DIR: dataDir
-        },
-        stdio: ['ignore', 'pipe', 'pipe']
-    });
-
-    serverProcess.stdout.on('data', () => {});
-    serverProcess.stderr.on('data', () => {});
-
-    await waitForHealth();
-    adminCookie = await loginAsAdmin();
+    await startServer();
 });
 
 test.after(async () => {
-    if (serverProcess && !serverProcess.killed) {
-        serverProcess.kill('SIGTERM');
-        await onceExit(serverProcess);
-    }
+    await stopServer();
 
     if (dataDir) {
         await fsPromises.rm(path.dirname(dataDir), { recursive: true, force: true });
@@ -212,6 +191,171 @@ test('versioned migrations are recorded in schema_migrations', async () => {
     ]);
 });
 
+test('backup and restore scripts preserve the database state', async () => {
+    const backupDir = path.join(tempRoot, 'backups');
+    const backupResult = await runNodeScript('scripts/backup.js', {
+        NIYAM_DATA_DIR: dataDir,
+        NIYAM_EXEC_DATA_KEY: currentExecKey,
+        NIYAM_BACKUP_DIR: backupDir,
+        NIYAM_BACKUP_COMPRESS: 'true',
+        NIYAM_BACKUP_ENCRYPT: 'false'
+    });
+
+    assert.equal(backupResult.status, 0, backupResult.stderr);
+    const backupJson = JSON.parse(backupResult.stdout);
+    assert.equal(backupJson.ok, true);
+    assert.ok(fs.existsSync(path.join(backupJson.snapshotDir, 'metadata.json')));
+
+    const restoreRoot = path.join(tempRoot, 'restore-target');
+    const restoreDataDir = path.join(restoreRoot, 'data');
+    await fsPromises.mkdir(restoreDataDir, { recursive: true });
+
+    const restoreResult = await runNodeScript('scripts/restore.js', {
+        NIYAM_DATA_DIR: restoreDataDir,
+        NIYAM_DB: path.join(restoreDataDir, 'niyam.db'),
+        NIYAM_EXEC_DATA_KEY: currentExecKey,
+        NIYAM_RESTORE_SKIP_PRE_BACKUP: '1'
+    }, [backupJson.snapshotDir]);
+
+    assert.equal(restoreResult.status, 0, restoreResult.stderr);
+    const restoredDb = new Database(path.join(restoreDataDir, 'niyam.db'), { readonly: true });
+    const commandCount = restoredDb.prepare('SELECT COUNT(*) AS count FROM commands').get().count;
+    const migrationCount = restoredDb.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get().count;
+    restoredDb.close();
+
+    assert.ok(commandCount >= 1);
+    assert.equal(migrationCount, 2);
+});
+
+test('exec key rotation preserves delayed execution payloads', async () => {
+    const ruleResponse = await apiJson('/api/rules', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            name: 'Rotation Medium Printf',
+            description: 'Force medium approval for rotation validation',
+            rule_type: 'pattern',
+            pattern: 'printf\\s+rotate-check',
+            risk_level: 'MEDIUM',
+            priority: 600
+        }
+    });
+
+    assert.equal(ruleResponse.status, 201);
+
+    const submission = await apiJson('/api/commands', {
+        method: 'POST',
+        token: 'dev-token',
+        body: {
+            command: 'printf',
+            args: ['rotate-check']
+        }
+    });
+
+    assert.equal(submission.status, 201);
+    assert.equal(submission.json.status, 'pending');
+
+    await stopServer();
+
+    const rotatedKey = 'test-exec-key-rotated';
+    const rotation = await runNodeScript('scripts/rotate_exec_key.js', {
+        NIYAM_DATA_DIR: dataDir,
+        NIYAM_EXEC_DATA_KEY: currentExecKey,
+        NIYAM_EXEC_DATA_KEY_OLD: currentExecKey,
+        NIYAM_EXEC_DATA_KEY_NEW: rotatedKey,
+        NIYAM_BACKUP_DIR: path.join(tempRoot, 'rotation-backups')
+    });
+
+    assert.equal(rotation.status, 0, rotation.stderr);
+    const rotationJson = JSON.parse(rotation.stdout);
+    assert.ok(rotationJson.rotatedRows >= 1);
+
+    currentExecKey = rotatedKey;
+    await startServer();
+
+    const approval = await apiJson(`/api/approvals/${submission.json.id}/approve`, {
+        method: 'POST',
+        cookie: adminCookie,
+        body: { rationale: 'rotate and execute' }
+    });
+    assert.equal(approval.status, 200);
+
+    const final = await waitForCommand(submission.json.id);
+    assert.equal(final.status, 'completed');
+    assert.equal(final.output.includes('rotate-check'), true);
+
+    const audit = await apiJson('/api/audit?limit=100', {
+        method: 'GET',
+        cookie: adminCookie
+    });
+    assert.equal(audit.status, 200);
+    assert.ok(audit.json.entries.some(entry => entry.event_type === 'exec_key_rotated'));
+});
+
+test('load and soak scripts complete successfully against the live API', async () => {
+    const load = await runNodeScript('scripts/load.js', {
+        NIYAM_BENCH_BASE_URL: baseUrl,
+        NIYAM_BENCH_ADMIN_USERNAME: 'admin',
+        NIYAM_BENCH_ADMIN_PASSWORD: 'admin',
+        NIYAM_BENCH_AGENT_TOKEN: 'dev-token',
+        NIYAM_LOAD_TOTAL_OPERATIONS: '8',
+        NIYAM_LOAD_CONCURRENCY: '2',
+        NIYAM_SERVER_PID: String(serverProcess.pid)
+    });
+
+    assert.equal(load.status, 0, load.stderr);
+    const loadJson = JSON.parse(load.stdout);
+    assert.equal(loadJson.ok, true);
+    assert.ok(loadJson.completedOperations >= 8);
+
+    const soak = await runNodeScript('scripts/soak.js', {
+        NIYAM_BENCH_BASE_URL: baseUrl,
+        NIYAM_BENCH_ADMIN_USERNAME: 'admin',
+        NIYAM_BENCH_ADMIN_PASSWORD: 'admin',
+        NIYAM_BENCH_AGENT_TOKEN: 'dev-token',
+        NIYAM_SOAK_DURATION_SECONDS: '3',
+        NIYAM_SOAK_CONCURRENCY: '2',
+        NIYAM_SERVER_PID: String(serverProcess.pid)
+    });
+
+    assert.equal(soak.status, 0, soak.stderr);
+    const soakJson = JSON.parse(soak.stdout);
+    assert.equal(soakJson.ok, true);
+    assert.ok(soakJson.completedOperations >= 1);
+});
+
+async function startServer() {
+    serverProcess = spawn(process.execPath, ['server.js'], {
+        cwd: ROOT_DIR,
+        env: {
+            ...process.env,
+            NIYAM_PORT: String(port),
+            NIYAM_ADMIN_PASSWORD: 'admin',
+            NIYAM_METRICS_TOKEN: 'metrics-secret',
+            NIYAM_AGENT_TOKENS: JSON.stringify({ forger: 'dev-token' }),
+            NIYAM_EXEC_ALLOWED_ROOTS: ROOT_DIR,
+            NIYAM_EXEC_DEFAULT_MODE: 'DIRECT',
+            NIYAM_EXEC_WRAPPER: '["/usr/bin/env"]',
+            NIYAM_EXEC_DATA_KEY: currentExecKey,
+            NIYAM_DATA_DIR: dataDir
+        },
+        stdio: ['ignore', 'pipe', 'pipe']
+    });
+
+    serverProcess.stdout.on('data', () => {});
+    serverProcess.stderr.on('data', () => {});
+
+    await waitForHealth();
+    adminCookie = await loginAsAdmin();
+}
+
+async function stopServer() {
+    if (serverProcess && !serverProcess.killed && serverProcess.exitCode === null) {
+        serverProcess.kill('SIGTERM');
+        await onceExit(serverProcess);
+    }
+}
+
 async function waitForHealth() {
     for (let attempt = 0; attempt < 30; attempt += 1) {
         try {
@@ -293,5 +437,36 @@ function onceExit(child) {
 
     return new Promise(resolve => {
         child.once('exit', resolve);
+    });
+}
+
+function runNodeScript(scriptPath, extraEnv = {}, args = []) {
+    return new Promise(resolve => {
+        const child = spawn(process.execPath, [scriptPath, ...args], {
+            cwd: ROOT_DIR,
+            env: {
+                ...process.env,
+                ...extraEnv
+            },
+            stdio: ['ignore', 'pipe', 'pipe']
+        });
+
+        let stdout = '';
+        let stderr = '';
+
+        child.stdout.on('data', chunk => {
+            stdout += chunk.toString();
+        });
+        child.stderr.on('data', chunk => {
+            stderr += chunk.toString();
+        });
+
+        child.on('close', status => {
+            resolve({
+                status,
+                stdout: stdout.trim(),
+                stderr: stderr.trim()
+            });
+        });
     });
 }

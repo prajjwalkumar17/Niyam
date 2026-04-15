@@ -63,6 +63,8 @@ Open `http://localhost:3000` and sign in with:
 - [Configuration reference](./docs/configuration.md)
 - [Self-hosted deployment](./docs/deployment.md)
 - [Backup and restore](./docs/backup_restore.md)
+- [Exec key rotation](./docs/key_rotation.md)
+- [Load and soak testing](./docs/load_testing.md)
 - [Security](./docs/security.md)
 - [Contributing](./docs/contributing.md)
 - [Public release checklist](./docs/public_release.md)
@@ -79,7 +81,10 @@ Open `http://localhost:3000` and sign in with:
 - rule-driven `DIRECT` vs `WRAPPER`
 - working-directory confinement
 - storage-time secret redaction with encrypted raw execution payloads
+- automated SQLite-safe backup and restore tooling
+- exec-key rotation with pre-rotation backup
 - structured logs, metrics, and alert hooks
+- built-in load and soak runners against the live API
 - smoke tests for both normal and wrapper execution paths
 
 ## Smoke Tests
@@ -88,6 +93,8 @@ Open `http://localhost:3000` and sign in with:
 npm test
 npm run smoke
 npm run smoke:wrapper
+npm run load
+npm run soak
 ```
 
 Use `smoke:wrapper` to prove a matching rule sends execution through `WRAPPER` mode while the default remains `DIRECT`.
@@ -99,7 +106,7 @@ The smoke tests now also verify:
 - storage-time redaction for submitted secrets
 - redacted command output and audit history
 
-`npm test` runs a live `node:test` suite against a temporary Niyam instance and covers policy simulation, rule-pack install behavior, and secret redaction.
+`npm test` runs a live `node:test` suite against a temporary Niyam instance and now covers policy simulation, rule-pack install behavior, secret redaction, backup/restore, exec-key rotation, and the benchmark runners.
 
 ## Example Policy Shape
 
@@ -110,7 +117,6 @@ The smoke tests now also verify:
 
 ## Current Gaps Worth Adding
 
-- versioned migrations and wider automated test coverage
 - multi-admin approval routing for larger teams
 - richer policy simulation diffing such as "why this changed from last run"
 - built-in pack presets for environment-specific workflows

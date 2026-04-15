@@ -1,6 +1,6 @@
 # Test Report
 
-Date: 2026-04-14
+Date: 2026-04-15
 
 This report captures the latest end-to-end verification run for Niyam after adding:
 
@@ -10,6 +10,9 @@ This report captures the latest end-to-end verification run for Niyam after addi
 - encrypted raw execution payloads
 - request validation on write endpoints
 - versioned schema migrations
+- automated backup and restore
+- exec-key rotation
+- load and soak runners
 
 ## Commands Run
 
@@ -32,11 +35,14 @@ Covered cases:
 - `built-in rule pack install is idempotent and influences simulation`
 - `secret redaction sanitizes stored command, output, and audit history`
 - `versioned migrations are recorded in schema_migrations`
+- `backup and restore scripts preserve the database state`
+- `exec key rotation preserves delayed execution payloads`
+- `load and soak scripts complete successfully against the live API`
 
 Summary:
 
 ```text
-5 passed, 0 failed
+8 passed, 0 failed
 ```
 
 ### `npm run smoke`
@@ -73,6 +79,9 @@ Wrapper smoke test passed on port 3410
 - redaction of audit and export data
 - rule-driven `WRAPPER` execution mode
 - versioned schema migration tracking
+- automated backup and restore flow
+- exec-key rotation with preserved delayed execution
+- load and soak runner success against a live instance
 
 ## Current Outcome
 

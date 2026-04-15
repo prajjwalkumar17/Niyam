@@ -1,78 +1,111 @@
 # Backup And Restore
 
-This guide covers practical backup, restore, and key-handling expectations for Niyam.
+This guide covers the built-in backup and restore workflow for Niyam.
+
+Related docs:
+
+- [Exec key rotation](./key_rotation.md)
+- [Self-hosted deployment](./deployment.md)
 
 ## What Needs Protection
 
 At minimum:
 
-- SQLite database file at `NIYAM_DB`
-- environment file or secret store holding:
+- SQLite database at `NIYAM_DB`
+- deployment secrets for:
   - `NIYAM_ADMIN_PASSWORD`
   - `NIYAM_AGENT_TOKENS`
   - `NIYAM_EXEC_DATA_KEY`
   - `NIYAM_METRICS_TOKEN`
 
-The database contains:
+The database includes:
 
-- commands
-- approvals
-- rules
+- commands and approvals
+- rules and rule-pack installs
 - audit history
-- encrypted raw execution payloads for pending and historical commands
-- sessions
+- persistent sessions
+- encrypted raw execution payloads
 
-## Backup Strategy
-
-Recommended:
-
-1. stop writes if possible, or use a SQLite-safe backup method
-2. copy the database and its associated WAL files if present
-3. store the backup with restricted access
-4. keep the matching `NIYAM_EXEC_DATA_KEY`
-
-For a simple maintenance backup:
+## Backup Command
 
 ```bash
-cp /var/lib/niyam/niyam.db /backup/niyam-$(date +%F).db
+npm run backup
 ```
 
-If WAL mode is active, capture the related `-wal` and `-shm` files or use a proper SQLite backup command.
+The backup script:
 
-## Restore Strategy
+- uses a SQLite-safe backup operation
+- writes a timestamped snapshot directory under `NIYAM_BACKUP_DIR`
+- records `metadata.json` with migration ids and payload checksum
+- optionally compresses and encrypts the snapshot payload
+- prunes old snapshots by retention policy
+
+Example output:
+
+```json
+{
+  "ok": true,
+  "snapshotDir": "/var/backups/niyam/2026-04-15T10-30-00-000Z",
+  "payloadFile": "niyam.db.gz",
+  "createdAt": "2026-04-15T10:30:00.000Z",
+  "pruned": []
+}
+```
+
+## Backup Settings
+
+- `NIYAM_BACKUP_DIR`
+- `NIYAM_BACKUP_RETENTION_DAYS`
+- `NIYAM_BACKUP_COMPRESS`
+- `NIYAM_BACKUP_ENCRYPT`
+- `NIYAM_BACKUP_PASSPHRASE_FILE`
+
+If encryption is enabled, `NIYAM_BACKUP_PASSPHRASE_FILE` must point to a file containing the backup passphrase.
+
+## Restore Command
+
+```bash
+npm run restore -- /path/to/backup-snapshot
+```
+
+You can pass either:
+
+- the snapshot directory
+- or the snapshot `metadata.json` path
+
+Recommended restore sequence:
 
 1. stop Niyam
-2. restore the database files into `NIYAM_DATA_DIR`
-3. restore the same `NIYAM_EXEC_DATA_KEY`
-4. start Niyam
-5. run:
+2. restore the snapshot
+3. start Niyam with the same `NIYAM_EXEC_DATA_KEY`
+4. run `npm test`
+5. run `npm run smoke`
+6. run `npm run smoke:wrapper` if wrapper mode is active
+
+By default, restore creates a pre-restore backup of the current database before replacing it.
+
+To skip that only when restoring into an empty target:
 
 ```bash
-npm test
-npm run smoke
+NIYAM_RESTORE_SKIP_PRE_BACKUP=1 npm run restore -- /path/to/backup-snapshot
 ```
 
-`smoke:wrapper` should also be run if wrapper mode is used in that environment.
+## systemd Automation
 
-## Why `NIYAM_EXEC_DATA_KEY` Matters
+Deployment templates now include:
 
-Niyam stores redacted display/history fields and encrypts the raw execution payload separately.
+- [../deploy/niyam-backup.service.template](../deploy/niyam-backup.service.template)
+- [../deploy/niyam-backup.timer.template](../deploy/niyam-backup.timer.template)
 
-If you restore the database without the matching `NIYAM_EXEC_DATA_KEY`:
+`npm run install:render` renders both alongside the main service template so operators can enable daily backups with `systemd`.
 
-- pending commands may fail to execute later
-- stored encrypted payloads will not decrypt
+## Why `NIYAM_EXEC_DATA_KEY` Still Matters
 
-## Key Rotation Guidance
+Backups preserve encrypted execution payload columns exactly as stored.
 
-There is no automatic key rotation workflow yet.
+If you restore a database without the matching `NIYAM_EXEC_DATA_KEY`:
 
-Safe rotation currently means:
+- pending commands may fail later
+- historical encrypted execution payloads cannot be decrypted
 
-1. ensure no important pending commands remain
-2. export or clear any rows that still rely on the old encrypted execution payload
-3. stop Niyam
-4. switch to the new `NIYAM_EXEC_DATA_KEY`
-5. restart and verify with smoke tests
-
-Until a formal rotation tool exists, do not rotate this key casually in a live environment with pending work.
+Use [Exec key rotation](./key_rotation.md) if you need to change that key safely.

@@ -37,6 +37,8 @@ render_template() {
 render_all() {
     mkdir -p "$RENDER_DIR"
     render_template "$ROOT_DIR/deploy/niyam.service.template" "$RENDER_DIR/${SERVICE_NAME}.service"
+    render_template "$ROOT_DIR/deploy/niyam-backup.service.template" "$RENDER_DIR/${SERVICE_NAME}-backup.service"
+    render_template "$ROOT_DIR/deploy/niyam-backup.timer.template" "$RENDER_DIR/${SERVICE_NAME}-backup.timer"
     render_template "$ROOT_DIR/deploy/Caddyfile.template" "$RENDER_DIR/Caddyfile"
     cp "$ROOT_DIR/deploy/niyam.env.example" "$RENDER_DIR/niyam.env"
 }

@@ -151,6 +151,15 @@ const config = {
         'USER',
         ...parseList(process.env.NIYAM_EXEC_ENV_ALLOWLIST)
     ],
+    BACKUP_DIR: process.env.NIYAM_BACKUP_DIR
+        ? path.resolve(process.env.NIYAM_BACKUP_DIR)
+        : path.join(DATA_DIR, 'backups'),
+    BACKUP_RETENTION_DAYS: parseIntEnv(process.env.NIYAM_BACKUP_RETENTION_DAYS, 14),
+    BACKUP_COMPRESS: parseBooleanEnv(process.env.NIYAM_BACKUP_COMPRESS, true),
+    BACKUP_ENCRYPT: parseBooleanEnv(process.env.NIYAM_BACKUP_ENCRYPT, false),
+    BACKUP_PASSPHRASE_FILE: process.env.NIYAM_BACKUP_PASSPHRASE_FILE
+        ? path.resolve(process.env.NIYAM_BACKUP_PASSPHRASE_FILE)
+        : '',
     REDACTION_ENABLED: parseBooleanEnv(process.env.NIYAM_REDACTION_ENABLED, true),
     REDACTION_REPLACEMENT: process.env.NIYAM_REDACTION_REPLACEMENT || '[REDACTED]',
     REDACTION_EXTRA_KEYS: parseSecretKeyList(process.env.NIYAM_REDACTION_EXTRA_KEYS),

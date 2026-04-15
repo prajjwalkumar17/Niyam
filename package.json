@@ -10,6 +10,11 @@
     "init-db": "node db/init.js",
     "smoke": "sh scripts/smoke.sh",
     "smoke:wrapper": "NIYAM_SMOKE_WRAPPER_TEST=1 sh scripts/smoke.sh",
+    "backup": "node scripts/backup.js",
+    "restore": "node scripts/restore.js",
+    "rotate:exec-key": "node scripts/rotate_exec_key.js",
+    "load": "node scripts/load.js",
+    "soak": "node scripts/soak.js",
     "install:render": "sh scripts/install.sh render",
     "install:stage": "sh scripts/install.sh install",
     "package:selfhost": "sh scripts/package.sh"

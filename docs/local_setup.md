@@ -8,6 +8,9 @@ Related docs:
 - [Feature guide](./features.md)
 - [API reference](./api_reference.md)
 - [Configuration reference](./configuration.md)
+- [Backup and restore](./backup_restore.md)
+- [Exec key rotation](./key_rotation.md)
+- [Load and soak testing](./load_testing.md)
 
 ## Prerequisites
 
@@ -80,6 +83,15 @@ Run the wrapper-routing smoke test:
 npm run smoke:wrapper
 ```
 
+Run operator-grade backup and benchmark tooling locally:
+
+```bash
+npm run backup
+NIYAM_EXEC_DATA_KEY_OLD=local-dev-key NIYAM_EXEC_DATA_KEY_NEW=local-dev-key-2 npm run rotate:exec-key -- --dry-run
+NIYAM_BENCH_BASE_URL=http://127.0.0.1:3000 NIYAM_BENCH_AGENT_TOKEN=dev-token npm run load
+NIYAM_BENCH_BASE_URL=http://127.0.0.1:3000 NIYAM_BENCH_AGENT_TOKEN=dev-token NIYAM_SOAK_DURATION_SECONDS=30 npm run soak
+```
+
 What they cover:
 
 - `npm test`: live HTTP tests for policy simulation, rule pack install/upgrade preview behavior, and redaction
@@ -92,6 +104,9 @@ What they cover:
 - command submission and execution
 - redaction of sensitive values in stored command history and audit data
 - rule-driven `WRAPPER` execution mode
+- backup and restore scripts
+- exec-key rotation flow
+- load and soak runners against the live API
 
 ## Local Dashboard Workflow
 

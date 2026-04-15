@@ -25,6 +25,14 @@ npm run install:render
 
 This renders service and proxy artifacts into `.deploy/`.
 
+Rendered files now include:
+
+- primary service unit
+- backup service unit
+- backup timer
+- reverse proxy template
+- example env file
+
 ## Stage An Install
 
 ```bash
@@ -71,6 +79,12 @@ Make sure your environment file also includes:
 - `NIYAM_EXEC_DATA_KEY`
 - `NIYAM_AGENT_TOKENS`
 - `NIYAM_METRICS_TOKEN`
+- backup settings if you want automated snapshots
+
+Backup automation templates:
+
+- [../deploy/niyam-backup.service.template](../deploy/niyam-backup.service.template)
+- [../deploy/niyam-backup.timer.template](../deploy/niyam-backup.timer.template)
 
 ## Reverse Proxy
 
@@ -88,8 +102,11 @@ Niyam should sit behind TLS in production.
 - configure a real wrapper if any policy resolves to `WRAPPER`
 - protect the host with normal OS controls, not just Niyam policy
 - enable metrics and hook alerts into your operational channel
+- enable the backup timer or another scheduled backup path
 - run `npm run smoke`
 - run `npm run smoke:wrapper` if wrapper mode is enabled
+- run `npm run load`
+- run `npm run soak`
 
 The smoke suite now also verifies:
 

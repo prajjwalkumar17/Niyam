@@ -92,6 +92,25 @@ Keep this tight. It is one of the main host-safety controls in Niyam.
 - `NIYAM_ALERT_EVENTS`
 - `NIYAM_ALERT_TIMEOUT_MS`
 
+## Backup Automation
+
+- `NIYAM_BACKUP_DIR`
+- `NIYAM_BACKUP_RETENTION_DAYS`
+- `NIYAM_BACKUP_COMPRESS`
+- `NIYAM_BACKUP_ENCRYPT`
+- `NIYAM_BACKUP_PASSPHRASE_FILE`
+
+These are used by `npm run backup`, `npm run restore`, and `npm run rotate:exec-key`.
+
+Recommended baseline:
+
+```bash
+export NIYAM_BACKUP_DIR=/var/backups/niyam
+export NIYAM_BACKUP_RETENTION_DAYS=14
+export NIYAM_BACKUP_COMPRESS=true
+export NIYAM_BACKUP_ENCRYPT=false
+```
+
 ## Redaction
 
 - `NIYAM_REDACTION_ENABLED`
@@ -121,6 +140,7 @@ export NIYAM_EXEC_DEFAULT_MODE=DIRECT
 export NIYAM_EXEC_WRAPPER='["bwrap","--unshare-all","--"]'
 export NIYAM_EXEC_DATA_KEY='replace-with-a-long-random-secret'
 export NIYAM_METRICS_TOKEN='replace-me'
+export NIYAM_BACKUP_DIR=/var/backups/niyam
 ```
 
 ## Example File
