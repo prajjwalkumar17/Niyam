@@ -20,7 +20,7 @@
   <a href="./docs/features.md">Features</a>
 </p>
 
-![Niyam dashboard showcase](./docs/assets/niyam-rules.gif)
+![Niyam rules and templates](./docs/assets/niyam-rules-packs.png)
 
 ## Why It Exists
 
@@ -53,11 +53,9 @@ Examples:
 - `git merge` can require approval and still stay `DIRECT`
 - `gh workflow run` can require approval and resolve to `WRAPPER`
 
-## Preview
+## Interface Preview
 
-| Rules and templates | Pending approvals |
-| --- | --- |
-| ![Niyam rules](./docs/assets/niyam-rules.gif) | ![Niyam approval flow](./docs/assets/niyam-approval-flow.gif) |
+![Niyam policy catalog](./docs/assets/niyam-policy-catalog.png)
 
 ## Quick Start
 
