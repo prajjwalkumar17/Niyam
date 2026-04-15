@@ -67,6 +67,19 @@ flowchart LR
 - Structured logs, metrics, alerts, audit history, and export paths
 - Backup, restore, exec-key rotation, load, soak, and smoke tooling
 
+## Upcoming Channels
+
+Niyam is built as a self-hosted control layer first, and the next operator-facing channel work is aimed at bringing approvals closer to where teams already collaborate.
+
+Planned approval channels:
+
+- Slack approval prompts for pending commands
+- Discord approval prompts for pending commands
+- Chat-driven approve or reject actions with rationale capture
+- Channel notifications for high-risk and wrapper-routed operations
+
+The intent is straightforward: let an operator approve a risky command from a trusted chat surface while Niyam remains the system of record for policy, execution, and audit.
+
 ## Quick Start
 
 ```bash
