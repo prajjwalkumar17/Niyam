@@ -1,84 +1,102 @@
 <p align="center">
-  <img src="./public/assets/niyam-mark.svg" alt="Niyam" width="96">
+  <img src="./public/assets/niyam-mark.svg" alt="Niyam" width="108">
 </p>
 
 <h1 align="center">Niyam</h1>
 
 <p align="center">
-  Command control for developer agents, operators, and high-trust teams.
+  Approval-first command control for developer agents and operator teams.
 </p>
 
 <p align="center">
-  Self-hosted. Approval-aware. Audit-heavy. Wrapper-capable.
+  Self-hosted. Policy-aware. Wrapper-capable. Audit-heavy.
 </p>
 
-## What Niyam Is
+## Why Niyam
 
-Niyam is the control layer between:
+Agents are useful right up until they become invisible shells with too much reach.
 
-- an agent that wants to run a command
-- the machine that would have executed it blindly
+Niyam sits between:
 
-It lets you decide three things before execution happens:
+- the system that wants to run a command
+- the machine that would otherwise execute it blindly
 
-1. how risky the command is
-2. whether it needs approval
-3. whether it runs `DIRECT` or inside a wrapper path
+It gives you one explicit control plane for:
 
-This is not a hosted approval SaaS. Niyam is a single-instance system you run in your own environment.
+- risk classification
+- approval gating
+- direct vs wrapper execution
+- audit, redaction, and operator recovery
 
-## Why It Exists
+This is not a hosted approval SaaS. Niyam is a single-instance control layer you run in your own environment.
 
-Most teams hit the same wall with automation:
-
-- full shell access is too permissive
-- blanket lock-down kills velocity
-- logs alone do not explain intent, approval, or execution context
-
-Niyam solves that with one operating model:
+## What It Solves
 
 - low-risk commands can move immediately
-- risky commands can stop for review
-- especially sensitive commands can be forced through a container, jail, or wrapper
-- every decision is stored, observable, and exportable
+- risky commands can stop for approval
+- sensitive commands can be forced through a wrapper or containerized path
+- dangerous patterns can be blocked entirely
+- every request, approval, execution, and rejection is recorded
 
-## The Product Loop
+Examples:
+
+- `ls public` can resolve to `LOW` and auto-run
+- `git merge` can require approval and still stay `DIRECT`
+- `gh workflow run` can require approval and resolve to `WRAPPER`
+- destructive filesystem patterns can be denied or isolated by rule
+
+## Product Loop
 
 ```mermaid
 flowchart LR
-    A["Agent or Operator"] --> B["Policy Simulation"]
-    B --> C["Risk + Approval Decision"]
-    C --> D["Execution Mode Resolution"]
-    D --> E["DIRECT or WRAPPER"]
-    E --> F["Execution + Output Redaction"]
+    A["Agent or Operator"] --> B["Simulate Policy"]
+    B --> C["Classify Risk"]
+    C --> D["Require Approval or Auto-Run"]
+    D --> E["Resolve DIRECT or WRAPPER"]
+    E --> F["Execute with Redaction"]
     F --> G["Audit, Metrics, Alerts"]
 ```
 
-## What You Get
+## Core Capabilities
 
-- Server-truth policy simulation before submission
-- Rule-driven approvals for `LOW`, `MEDIUM`, and `HIGH` workflows
-- Rule-driven `DIRECT` vs `WRAPPER` execution
-- Built-in rule packs for `git`, `gh`, `docker`, `kubectl`, and `terraform`
-- Prebuilt policy templates for common developer tooling so you can start from sane defaults instead of writing regexes from scratch
-- Two-person approval support for higher-risk commands
-- Storage-time secret redaction plus encrypted raw execution payloads
-- Persistent admin sessions and bearer-token agent access
-- Structured logs, metrics, alerts, audit history, and export paths
-- Backup, restore, exec-key rotation, load, soak, and smoke tooling
+- server-truth policy simulation before submission
+- rule-driven approvals for `LOW`, `MEDIUM`, and `HIGH`
+- rule-driven `DIRECT` vs `WRAPPER` execution
+- two-person approval support for high-risk flows
+- storage-time secret redaction with encrypted raw execution payloads
+- persistent admin sessions and bearer-token agent access
+- structured logs, metrics, alerts, audit history, and exports
+- backup, restore, exec-key rotation, load, soak, and smoke tooling
+
+## Prebuilt Policy Templates
+
+Niyam ships with installable policy templates for tooling teams already use:
+
+- `gh`
+- `git`
+- `docker`
+- `kubectl`
+- `terraform`
+
+These templates are starting points for:
+
+- risk classification
+- approval defaults
+- wrapper routing for sensitive operations
+- faster operator setup without hand-writing everything from zero
+
+Install a pack, review the generated policy, then tune from a usable baseline.
 
 ## Upcoming Channels
 
-Niyam is built as a self-hosted control layer first, and the next operator-facing channel work is aimed at bringing approvals closer to where teams already collaborate.
+Planned operator-facing approval channels:
 
-Planned approval channels:
+- Slack approval prompts
+- Discord approval prompts
+- chat-driven approve or reject actions with rationale capture
+- high-risk notifications for pending and wrapper-routed operations
 
-- Slack approval prompts for pending commands
-- Discord approval prompts for pending commands
-- Chat-driven approve or reject actions with rationale capture
-- Channel notifications for high-risk and wrapper-routed operations
-
-The intent is straightforward: let an operator approve a risky command from a trusted chat surface while Niyam remains the system of record for policy, execution, and audit.
+The goal is to let teams approve from trusted collaboration surfaces while Niyam remains the system of record.
 
 ## Quick Start
 
@@ -92,7 +110,7 @@ Open `http://localhost:3000` and sign in with:
 - username: `admin` unless `NIYAM_ADMIN_USERNAME` is set
 - password: the value of `NIYAM_ADMIN_PASSWORD`
 
-If you want an interactive bootstrap instead of setting everything by hand:
+If you want the guided bootstrap:
 
 ```bash
 ./oneclick-setup.sh
@@ -104,43 +122,17 @@ or:
 npm run setup:interactive
 ```
 
-The same script now has a top-level `Start existing server env and stream logs` option if you already have `.env.local` or another env file and just want to boot Niyam fast.
+The setup flow can also start an existing env and stream logs directly.
 
-## What It Looks Like In Practice
+## Docs
 
-- `ls public` can resolve to `LOW` and run immediately
-- `git merge` can require approval but still stay `DIRECT`
-- `gh workflow run` can require approval and resolve to `WRAPPER`
-- destructive filesystem patterns can be blocked or isolated by rule
-
-## Prebuilt Policy Templates
-
-Niyam ships with curated policy templates for tooling teams already use every day:
-
-- `gh`
-- `terraform`
-- `kubectl`
-- `docker`
-- `git`
-
-These are not just labels in the UI. They are installable starting points for:
-
-- risk classification
-- approval defaults
-- wrapper routing for sensitive operations
-- faster operator setup with fewer hand-written rules
-
-The goal is simple: install a pack, review the generated policy, and start from a usable baseline instead of building everything from zero.
-
-## Read The Right Doc
-
-### Start Here
+Start here:
 
 - [Local setup](./docs/local_setup.md)
 - [Usage guide](./docs/usage.md)
 - [Feature guide](./docs/features.md)
 
-### Operators
+Operators:
 
 - [Configuration reference](./docs/configuration.md)
 - [Self-hosted deployment](./docs/deployment.md)
@@ -148,7 +140,7 @@ The goal is simple: install a pack, review the generated policy, and start from 
 - [Exec key rotation](./docs/key_rotation.md)
 - [Load and soak testing](./docs/load_testing.md)
 
-### Integrators And Reviewers
+Integrators and reviewers:
 
 - [API reference](./docs/api_reference.md)
 - [Security](./docs/security.md)
@@ -156,7 +148,7 @@ The goal is simple: install a pack, review the generated policy, and start from 
 - [Public release checklist](./docs/public_release.md)
 - [Test report](./docs/test_report.md)
 
-## Verify A Release
+## Verify
 
 ```bash
 npm test
@@ -168,30 +160,29 @@ npm run load
 npm run soak
 ```
 
-What that proves:
+What that covers:
 
-- policy simulation works against the real server
-- rule-pack install and matching work end to end
-- secret redaction reaches command history, output, and audit history
-- wrapper routing works when a rule resolves to `WRAPPER`
-- dashboard smoke can safely populate realistic demo activity for UI review
-- dashboard smoke reset can remove only the demo commands, rules, approvals, and audit rows it created
-- backup, restore, and exec-key rotation work on live data paths
-- the API survives burst and sustained benchmark traffic
+- policy simulation against the real server
+- pack install and rule matching
+- wrapper routing
+- redaction in history, output, and audit data
+- dashboard demo-data populate and cleanup
+- backup, restore, and exec-key rotation
+- burst and sustained benchmark traffic
 
 ## Smoke Flows
 
 - `npm run smoke`
-  Validates the core runtime: boot, auth, metrics, submission, approval, execution, and stored history.
+  Core runtime verification.
 - `npm run smoke:wrapper`
-  Validates the rule-driven `WRAPPER` path with a harmless local wrapper.
+  Rule-driven wrapper path verification.
 - `npm run smoke:dashboard`
-  Populates the dashboard with safe demo activity so you can inspect stats, pending approvals, history, and audit UI with realistic data.
+  Safe demo data for UI review.
 - `npm run smoke:dashboard:reset`
-  Removes only the dashboard smoke artifacts by using the smoke state file and `dashboard_smoke` metadata tags.
+  Removes only dashboard smoke artifacts.
 
 ## Operating Thesis
 
-Niyam is for teams that want agents to be useful without becoming invisible root shells.
+Niyam is for teams that want agents to be useful without becoming unaccountable root shells.
 
-It gives you a narrow, explicit place to enforce approval, isolation, auditability, and recovery before command execution becomes an incident review.
+It gives you one narrow, explicit place to enforce approval, isolation, auditability, and recovery before command execution turns into incident response.
