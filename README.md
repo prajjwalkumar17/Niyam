@@ -20,7 +20,7 @@
   <a href="./docs/features.md">Features</a>
 </p>
 
-![Niyam rules and templates](./docs/assets/niyam-rules-packs.png)
+![Niyam dashboard](./docs/assets/niyam-dashboard.png)
 
 ## Why It Exists
 
@@ -53,9 +53,19 @@ Examples:
 - `git merge` can require approval and still stay `DIRECT`
 - `gh workflow run` can require approval and resolve to `WRAPPER`
 
-## Interface Preview
+## Product Preview
+
+**Rules and pack templates**
+
+![Niyam rules and templates](./docs/assets/niyam-rules-packs.png)
+
+**Policy catalog**
 
 ![Niyam policy catalog](./docs/assets/niyam-policy-catalog.png)
+
+**Audit trail**
+
+![Niyam audit log](./docs/assets/niyam-audit-log.png)
 
 ## Quick Start
 
@@ -75,9 +85,11 @@ Want guided setup instead?
 ./oneclick-setup.sh
 ```
 
+Windows users should start with [Local setup](./docs/local_setup.md), which includes both `WSL` and native `PowerShell` paths.
+
 ## Start Here
 
-- [Local setup](./docs/local_setup.md): install, env, local run, smoke flow
+- [Local setup](./docs/local_setup.md): macOS, Linux, Windows, first-run demo flow, curl examples
 - [Usage guide](./docs/usage.md): approvals, packs, wrapper mode, operator flow
 - [Feature guide](./docs/features.md): simulation, templates, redaction
 - [API reference](./docs/api_reference.md): endpoints and payloads
