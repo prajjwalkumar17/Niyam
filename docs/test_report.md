@@ -20,6 +20,8 @@ This report captures the latest end-to-end verification run for Niyam after addi
 npm test
 npm run smoke
 npm run smoke:wrapper
+npm run smoke:dashboard
+npm run smoke:dashboard:reset
 ```
 
 ## Results
@@ -65,6 +67,36 @@ Observed result:
 Wrapper smoke test passed on port 3410
 ```
 
+### `npm run smoke:dashboard`
+
+Status: Passed
+
+Observed result:
+
+```text
+Created 4 safe demo commands for the live dashboard:
+- 1 LOW completed
+- 1 MEDIUM completed
+- 1 MEDIUM pending
+- 1 HIGH pending
+State file written to .local/dashboard-smoke-state.json
+```
+
+### `npm run smoke:dashboard:reset`
+
+Status: Passed
+
+Observed result:
+
+```text
+Removed smoke artifacts from the live dashboard:
+- 4 commands
+- 1 approval
+- 3 rules
+- 10 related audit entries
+State file removed
+```
+
 ## What Was Verified
 
 - server boot and health endpoint
@@ -78,6 +110,8 @@ Wrapper smoke test passed on port 3410
 - redaction of execution output
 - redaction of audit and export data
 - rule-driven `WRAPPER` execution mode
+- dashboard-safe demo data population for visual UI review
+- targeted cleanup of dashboard smoke artifacts
 - versioned schema migration tracking
 - automated backup and restore flow
 - exec-key rotation with preserved delayed execution

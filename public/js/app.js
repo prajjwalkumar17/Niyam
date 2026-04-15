@@ -24,6 +24,36 @@ const API_BASE = '/api';
 // Auto-refresh interval (ms)
 const AUTO_REFRESH_MS = 10000;
 
+const ICONS = {
+    dashboard: '<svg viewBox="0 0 24 24"><path d="M4 19h16M7 15v-4M12 15V7M17 15v-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+    pending: '<svg viewBox="0 0 24 24"><path d="M8 4h8M8 20h8M8 4c0 4 8 4 8 8s-8 4-8 8M16 4c0 4-8 4-8 8s8 4 8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    history: '<svg viewBox="0 0 24 24"><path d="M8 5h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8a3 3 0 1 1 0-6h10M8 5a3 3 0 1 0 0 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    rules: '<svg viewBox="0 0 24 24"><path d="M9 4h6l1 2h3v14H5V6h3l1-2Zm0 6h6M9 12h6M9 16h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    audit: '<svg viewBox="0 0 24 24"><path d="M10.5 18a7.5 7.5 0 1 1 5.3-2.2L20 20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    activity: '<svg viewBox="0 0 24 24"><path d="M5 12h4l2-4 3 8 2-4h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    done: '<svg viewBox="0 0 24 24"><path d="m5 12 4.2 4L19 6.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    blocked: '<svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+    package: '<svg viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Zm0 0v9m8-4.5-8 4.5-8-4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+};
+
+function renderUiIcon(name, className = '') {
+    const svg = ICONS[name] || ICONS.activity;
+    return `<span class="${className}">${svg}</span>`;
+}
+
+function renderEmptyState(message, icon = 'activity') {
+    return `
+        <div class="empty-state">
+            <div class="empty-state-icon">${ICONS[icon] || ICONS.activity}</div>
+            <div class="empty-state-text">${message}</div>
+        </div>
+    `;
+}
+
+function renderEventChip(label, tone = '') {
+    return `<span class="icon-chip ${tone}">${label}</span>`;
+}
+
 // ═══════════════════════════════════════════
 // Initialization
 // ═══════════════════════════════════════════
@@ -301,7 +331,7 @@ function toggleAutoRefresh() {
 function updateAutoRefreshButton() {
     const btn = document.getElementById('auto-refresh-toggle');
     if (!btn) return;
-    btn.textContent = state.autoRefreshEnabled ? '🔄 Auto: ON' : '⏸️ Auto: OFF';
+    btn.innerHTML = `${renderUiIcon('activity', 'btn-icon')}Auto: ${state.autoRefreshEnabled ? 'ON' : 'OFF'}`;
 }
 
 function silentlyRefreshCurrentPage() {

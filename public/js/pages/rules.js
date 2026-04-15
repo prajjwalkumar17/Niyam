@@ -6,116 +6,201 @@ let editingRuleId = null;
 
 function renderRules(container) {
     container.innerHTML = `
-        <div class="card" style="margin-bottom:20px">
-            <div class="card-header">
-                <span class="card-title">Built-In Rule Packs</span>
+        <section class="workspace-header fade-in">
+            <div class="workspace-header-copy">
+                <div class="workspace-kicker">Policy Fabric</div>
+                <p class="workspace-subtitle">Manage curated pack templates, custom rules, risk overrides, and wrapper routing from one compact control surface.</p>
             </div>
-            <div id="rule-packs-list"></div>
-        </div>
-        <div class="filters">
-            <select class="filter-select" id="rules-type-filter">
-                <option value="">All Types</option>
-                <option value="pattern">Pattern</option>
-                <option value="allowlist">Allowlist</option>
-                <option value="denylist">Denylist</option>
-                <option value="risk_override">Risk Override</option>
-                <option value="execution_mode">Execution Mode</option>
-            </select>
-            <button class="btn btn-primary" id="add-rule-btn">+ Add Rule</button>
-        </div>
-        <div id="rules-list"></div>
+            <div class="workspace-controls">
+                <button class="btn btn-primary" id="add-rule-btn">New Rule</button>
+            </div>
+        </section>
+        <section class="rules-overview fade-in" id="rules-overview"></section>
+        <section class="rules-section fade-in">
+            <div class="rules-section-head">
+                <div>
+                    <div class="card-title">Built-In Rule Packs</div>
+                    <div class="rules-section-copy">Curated packs for common developer tooling with preview and upgrade support.</div>
+                </div>
+            </div>
+            <div class="rules-pack-grid" id="rule-packs-list"></div>
+        </section>
+        <section class="rules-section fade-in">
+            <div class="rules-section-head">
+                <div>
+                    <div class="card-title">Policy Catalog</div>
+                    <div class="rules-section-copy">Live rules evaluated by the engine, ordered for operator review and quick edits.</div>
+                </div>
+                <div class="rules-toolbar">
+                    <select class="filter-select" id="rules-source-filter">
+                        <option value="">All Sources</option>
+                    </select>
+                    <select class="filter-select" id="rules-type-filter">
+                        <option value="">All Types</option>
+                        <option value="pattern">Pattern</option>
+                        <option value="allowlist">Allowlist</option>
+                        <option value="denylist">Denylist</option>
+                        <option value="risk_override">Risk Override</option>
+                        <option value="execution_mode">Execution Mode</option>
+                    </select>
+                </div>
+            </div>
+            <div id="rules-list"></div>
+        </section>
     `;
 
     document.getElementById('rules-type-filter').addEventListener('change', loadRulesPage);
+    document.getElementById('rules-source-filter').addEventListener('change', loadRulesPage);
     document.getElementById('add-rule-btn').addEventListener('click', () => openRuleForm());
     loadRulesPage();
 }
 
 async function loadRulesPage() {
-    await Promise.all([
-        loadRulePacks(),
-        loadRulesList()
-    ]);
+    try {
+        const typeFilter = document.getElementById('rules-type-filter').value;
+        const sourceFilter = document.getElementById('rules-source-filter').value;
+
+        const [packsResponse, rulesResponse] = await Promise.all([
+            apiFetch('/rule-packs'),
+            apiFetch('/rules')
+        ]);
+
+        const [packs, rules] = await Promise.all([
+            packsResponse.json(),
+            rulesResponse.json()
+        ]);
+
+        populateSourceFilter(packs, rules, sourceFilter);
+        const filteredRules = filterRules(rules, typeFilter, sourceFilter);
+
+        renderRulesOverview(packs, filteredRules, typeFilter, sourceFilter);
+        renderRulePacks(packs);
+        renderRulesList(filteredRules, typeFilter, sourceFilter);
+    } catch (error) {
+        document.getElementById('rules-overview').innerHTML = renderEmptyState('Failed to load policy overview', 'blocked');
+        document.getElementById('rule-packs-list').innerHTML = renderEmptyState('Failed to load rule packs', 'blocked');
+        document.getElementById('rules-list').innerHTML = renderEmptyState('Failed to load rules', 'blocked');
+    }
 }
 
-async function loadRulePacks() {
+function renderRulesOverview(packs, rules, typeFilter, sourceFilter) {
+    const overview = document.getElementById('rules-overview');
+    const installedPackCount = Array.isArray(packs) ? packs.filter(pack => pack.installed).length : 0;
+    const managedRules = Array.isArray(rules) ? rules.filter(rule => Boolean(rule.managed_by_pack)).length : 0;
+    const wrapperRules = Array.isArray(rules) ? rules.filter(rule => rule.execution_mode === 'WRAPPER').length : 0;
+    const enabledRules = Array.isArray(rules) ? rules.filter(rule => Number(rule.enabled) === 1).length : 0;
+
+    overview.innerHTML = `
+        <div class="rules-overview-grid">
+            <div class="rules-metric-tile">
+                <div class="rules-metric-label">Live Rules</div>
+                <div class="rules-metric-value">${Array.isArray(rules) ? rules.length : 0}</div>
+                <div class="rules-metric-foot">${enabledRules} enabled for evaluation</div>
+            </div>
+            <div class="rules-metric-tile">
+                <div class="rules-metric-label">Installed Packs</div>
+                <div class="rules-metric-value">${installedPackCount}</div>
+                <div class="rules-metric-foot">${Array.isArray(packs) ? packs.length : 0} curated packs available</div>
+            </div>
+            <div class="rules-metric-tile">
+                <div class="rules-metric-label">Wrapper Paths</div>
+                <div class="rules-metric-value">${wrapperRules}</div>
+                <div class="rules-metric-foot">Rules forcing isolated execution</div>
+            </div>
+            <div class="rules-metric-tile">
+                <div class="rules-metric-label">Pack Managed</div>
+                <div class="rules-metric-value">${managedRules}</div>
+                <div class="rules-metric-foot">Rules installed from curated packs</div>
+            </div>
+        </div>
+        <div class="rules-summary-rail">
+            <span class="rules-summary-chip">${typeFilter ? `Filter · ${formatRuleType(typeFilter)}` : 'Filter · All types'}</span>
+            <span class="rules-summary-chip">${formatSourceFilterLabel(sourceFilter, packs)}</span>
+            <span class="rules-summary-chip">Priority driven evaluation</span>
+            <span class="rules-summary-chip">Approval and execution routing</span>
+        </div>
+    `;
+}
+
+function renderRulePacks(packs) {
     const container = document.getElementById('rule-packs-list');
 
-    try {
-        const response = await apiFetch('/rule-packs');
-        const packs = await response.json();
+    if (!Array.isArray(packs) || packs.length === 0) {
+        container.innerHTML = renderEmptyState('No built-in rule packs found', 'package');
+        return;
+    }
 
-        if (!Array.isArray(packs) || packs.length === 0) {
-            container.innerHTML = '<div class="empty-state"><div class="empty-state-text">No built-in rule packs found</div></div>';
-            return;
-        }
-
-        container.innerHTML = packs.map(pack => `
-            <div class="rule-card fade-in">
-                <div class="rule-info">
-                    <div class="rule-name">${escapeHtml(pack.name)} <span class="text-sm text-muted">v${escapeHtml(pack.version)}</span></div>
-                    <div class="rule-desc">${escapeHtml(pack.description || '')}</div>
-                </div>
-                <div class="rule-meta">
-                    <span class="status-badge ${pack.installed ? 'approved' : 'pending'}">${pack.installed ? `Installed (${pack.installedRuleCount}/${pack.totalRules})` : 'Not Installed'}</span>
-                </div>
-                <div class="rule-actions">
-                    <button class="btn btn-secondary btn-sm" onclick="previewRulePack('${pack.id}')">Preview</button>
-                    <button class="btn btn-secondary btn-sm" onclick="previewRulePackUpgrade('${pack.id}')">Upgrade Preview</button>
-                    <button class="btn btn-primary btn-sm" onclick="installRulePack('${pack.id}')">Install</button>
-                    <button class="btn btn-secondary btn-sm" onclick="upgradeRulePack('${pack.id}')">Upgrade</button>
+    container.innerHTML = packs.map(pack => `
+        <article class="pack-panel fade-in">
+            <div class="pack-panel-head">
+                <div class="pack-mark">${escapeHtml(pack.id.slice(0, 2).toUpperCase())}</div>
+                <div class="pack-head-copy">
+                    <div class="pack-title-row">
+                        <h3 class="pack-title">${escapeHtml(pack.name)}</h3>
+                        <span class="pack-version">v${escapeHtml(pack.version)}</span>
+                    </div>
+                    <p class="pack-description">${escapeHtml(pack.description || '')}</p>
                 </div>
             </div>
-        `).join('');
-    } catch (error) {
-        container.innerHTML = '<div class="empty-state"><div class="empty-state-text">Failed to load rule packs</div></div>';
-    }
+            <div class="pack-stats">
+                <div class="pack-stat">
+                    <span class="pack-stat-label">Status</span>
+                    <span class="status-badge ${pack.installed ? 'approved' : 'pending'}">${pack.installed ? 'Installed' : 'Available'}</span>
+                </div>
+                <div class="pack-stat">
+                    <span class="pack-stat-label">Rules</span>
+                    <span class="pack-stat-value">${pack.installedRuleCount}/${pack.totalRules}</span>
+                </div>
+            </div>
+            <div class="pack-actions">
+                <button class="btn btn-secondary btn-sm" onclick="previewRulePack('${pack.id}')">Preview</button>
+                <button class="btn btn-secondary btn-sm" onclick="previewRulePackUpgrade('${pack.id}')">Upgrade Preview</button>
+                <button class="btn btn-primary btn-sm" onclick="installRulePack('${pack.id}')">Install</button>
+                <button class="btn btn-secondary btn-sm" onclick="upgradeRulePack('${pack.id}')">Upgrade</button>
+            </div>
+        </article>
+    `).join('');
 }
 
-async function loadRulesList() {
-    const typeFilter = document.getElementById('rules-type-filter').value;
+function renderRulesList(rules, typeFilter, sourceFilter) {
+    const list = document.getElementById('rules-list');
 
-    try {
-        let url = `${API_BASE}/rules`;
-        if (typeFilter) {
-            url += `?ruleType=${typeFilter}`;
-        }
-
-        const response = await apiFetch(url);
-        const rules = await response.json();
-
-        const list = document.getElementById('rules-list');
-
-        if (!Array.isArray(rules) || rules.length === 0) {
-            list.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><div class="empty-state-text">No rules defined</div></div>';
-            return;
-        }
-
-        list.innerHTML = rules.map(rule => `
-            <div class="rule-card fade-in">
-                <div class="rule-info">
-                    <div class="rule-name">
-                        ${escapeHtml(rule.name)}
-                        ${rule.managed_by_pack ? `<span class="text-sm text-muted">· pack ${escapeHtml(rule.managed_by_pack)} v${escapeHtml(rule.managed_by_pack_version || 'unknown')}</span>` : ''}
-                    </div>
-                    <div class="rule-desc">${escapeHtml(rule.description || 'No description')} ${rule.pattern ? '· Pattern: <code>' + escapeHtml(rule.pattern) + '</code>' : ''}</div>
-                </div>
-                <div class="rule-meta">
-                    <span class="rule-type-badge ${rule.rule_type}">${rule.rule_type.replace('_', ' ')}</span>
-                    ${rule.risk_level ? '<span class="risk-badge ' + rule.risk_level.toLowerCase() + '">' + rule.risk_level + '</span>' : ''}
-                    ${rule.execution_mode ? '<span class="status-badge executing">' + rule.execution_mode + '</span>' : ''}
-                    <span class="text-sm text-muted">P:${rule.priority}</span>
-                </div>
-                <div class="rule-actions">
-                    <button class="btn btn-secondary btn-sm" onclick="toggleRule('${rule.id}', ${rule.enabled})">${rule.enabled ? 'Disable' : 'Enable'}</button>
-                    <button class="btn btn-secondary btn-sm" onclick="editRule('${rule.id}')">Edit</button>
-                    <button class="btn btn-danger btn-sm" onclick="deleteRule('${rule.id}', '${escapeHtml(rule.name)}')">Delete</button>
-                </div>
-            </div>
-        `).join('');
-    } catch (error) {
-        document.getElementById('rules-list').innerHTML = '<div class="empty-state"><div class="empty-state-text">Failed to load rules</div></div>';
+    if (!Array.isArray(rules) || rules.length === 0) {
+        const hasFilter = Boolean(typeFilter || sourceFilter);
+        list.innerHTML = renderEmptyState(hasFilter ? 'No rules match the selected filters' : 'No rules defined', 'rules');
+        return;
     }
+
+    list.innerHTML = `<div class="policy-stream">${
+        rules.map(rule => `
+            <article class="policy-card fade-in ${rule.enabled ? 'is-enabled' : 'is-disabled'}">
+                <div class="policy-card-head">
+                    <div class="policy-card-copy">
+                        <div class="policy-card-meta">
+                            <span class="policy-source">${rule.managed_by_pack ? `Pack · ${escapeHtml(rule.managed_by_pack)}` : 'Custom rule'}</span>
+                            <span class="policy-state ${rule.enabled ? 'enabled' : 'disabled'}">${rule.enabled ? 'Enabled' : 'Disabled'}</span>
+                        </div>
+                        <h3 class="policy-title">${escapeHtml(rule.name)}</h3>
+                        <p class="policy-description">${escapeHtml(rule.description || 'No description')}</p>
+                    </div>
+                    <div class="policy-badges">
+                        <span class="rule-type-badge ${rule.rule_type}">${formatRuleType(rule.rule_type)}</span>
+                        ${rule.risk_level ? '<span class="risk-badge ' + rule.risk_level.toLowerCase() + '">' + rule.risk_level + '</span>' : ''}
+                        ${rule.execution_mode ? '<span class="status-badge executing">' + rule.execution_mode + '</span>' : ''}
+                        <span class="rule-priority">P:${rule.priority}</span>
+                    </div>
+                </div>
+                <div class="policy-card-body">
+                    ${rule.pattern ? `<div class="policy-pattern"><span class="policy-pattern-label">Pattern</span><code>${escapeHtml(rule.pattern)}</code></div>` : '<div class="policy-pattern policy-pattern-empty"><span class="policy-pattern-label">Pattern</span><span class="text-muted">No regex pattern attached</span></div>'}
+                    <div class="policy-actions">
+                        <button class="btn btn-secondary btn-sm" onclick="toggleRule('${rule.id}', ${rule.enabled})">${rule.enabled ? 'Disable' : 'Enable'}</button>
+                        <button class="btn btn-secondary btn-sm" onclick="editRule('${rule.id}')">Edit</button>
+                        <button class="btn btn-danger btn-sm" onclick="deleteRule('${rule.id}', '${escapeHtml(rule.name)}')">Delete</button>
+                    </div>
+                </div>
+            </article>
+        `).join('')
+    }</div>`;
 }
 
 function openRuleForm(rule = null) {
@@ -378,6 +463,78 @@ function renderPackRuleNames(items) {
     }
 
     return items.map(item => `<div class="text-sm" style="padding:4px 0">${escapeHtml(item.name)}</div>`).join('');
+}
+
+function formatRuleType(value) {
+    return String(value || '')
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, character => character.toUpperCase());
+}
+
+function populateSourceFilter(packs, rules, selectedValue) {
+    const select = document.getElementById('rules-source-filter');
+    if (!select) {
+        return;
+    }
+
+    const options = [];
+    const hasCustomRules = Array.isArray(rules) && rules.some(rule => !rule.managed_by_pack);
+    if (hasCustomRules) {
+        options.push({ value: '__custom__', label: 'Custom Rules' });
+    }
+
+    const installedPacks = Array.isArray(packs)
+        ? packs.filter(pack => pack.installed || (Array.isArray(rules) && rules.some(rule => rule.managed_by_pack === pack.id)))
+        : [];
+
+    for (const pack of installedPacks) {
+        options.push({
+            value: pack.id,
+            label: pack.name || pack.id
+        });
+    }
+
+    select.innerHTML = [
+        '<option value="">All Sources</option>',
+        ...options.map(option => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`)
+    ].join('');
+
+    select.value = options.some(option => option.value === selectedValue) ? selectedValue : '';
+}
+
+function filterRules(rules, typeFilter, sourceFilter) {
+    if (!Array.isArray(rules)) {
+        return [];
+    }
+
+    return rules.filter(rule => {
+        if (typeFilter && rule.rule_type !== typeFilter) {
+            return false;
+        }
+
+        if (!sourceFilter) {
+            return true;
+        }
+
+        if (sourceFilter === '__custom__') {
+            return !rule.managed_by_pack;
+        }
+
+        return rule.managed_by_pack === sourceFilter;
+    });
+}
+
+function formatSourceFilterLabel(sourceFilter, packs) {
+    if (!sourceFilter) {
+        return 'Source · All origins';
+    }
+
+    if (sourceFilter === '__custom__') {
+        return 'Source · Custom rules';
+    }
+
+    const matchingPack = Array.isArray(packs) ? packs.find(pack => pack.id === sourceFilter) : null;
+    return `Source · ${matchingPack?.name || sourceFilter}`;
 }
 
 function openPackModal(title, bodyHtml) {

@@ -16,56 +16,83 @@ let auditState = {
 
 function renderAudit(container) {
     container.innerHTML = `
-        <div class="filters">
-            <select class="filter-select" id="audit-event-filter">
-                <option value="">All Events</option>
-                <option value="command_submitted">Command Submitted</option>
-                <option value="command_approved">Command Approved</option>
-                <option value="command_rejected">Command Rejected</option>
-                <option value="command_executed">Command Executed</option>
-                <option value="command_failed">Command Failed</option>
-                <option value="command_blocked">Command Blocked</option>
-                <option value="command_timeout">Command Timeout</option>
-                <option value="approval_granted">Approval Granted</option>
-                <option value="rule_created">Rule Created</option>
-                <option value="rule_updated">Rule Updated</option>
-                <option value="rule_deleted">Rule Deleted</option>
-                <option value="rule_pack_installed">Rule Pack Installed</option>
-                <option value="rule_pack_upgrade_previewed">Rule Pack Upgrade Previewed</option>
-                <option value="rule_pack_upgraded">Rule Pack Upgraded</option>
-            </select>
-            <input type="text" class="form-input" id="audit-actor-filter" placeholder="Filter by actor..." style="width:180px">
-            <input type="date" class="form-input" id="audit-start-date" title="Start date" style="width:150px">
-            <input type="date" class="form-input" id="audit-end-date" title="End date" style="width:150px">
-            <button class="btn btn-secondary" id="audit-apply-btn">Apply</button>
-            <button class="btn btn-secondary" id="audit-clear-btn">Clear</button>
-            <div style="margin-left:auto;display:flex;gap:8px">
-                <button class="btn btn-secondary" id="audit-export-json">Export JSON</button>
-                <button class="btn btn-secondary" id="audit-export-csv">Export CSV</button>
+        <section class="workspace-header fade-in">
+            <div class="workspace-header-copy">
+                <div class="workspace-kicker">Audit Trail</div>
+                <p class="workspace-subtitle">Search governance events, exports, actor activity, and policy changes from one structured timeline.</p>
             </div>
-        </div>
-        <div class="grid-2" style="margin-bottom:20px">
-            <div class="card">
-                <div class="card-header">
-                    <span class="card-title">Event Distribution</span>
+            <div class="workspace-controls">
+                <div class="audit-export-actions">
+                    <button class="btn btn-secondary" id="audit-export-json">Export JSON</button>
+                    <button class="btn btn-secondary" id="audit-export-csv">Export CSV</button>
                 </div>
-                <div id="audit-event-stats" style="display:flex;flex-wrap:wrap;gap:8px"></div>
             </div>
-            <div class="card">
-                <div class="card-header">
-                    <span class="card-title">Top Actors</span>
+        </section>
+        <section class="surface-section fade-in">
+            <div class="surface-section-head">
+                <div>
+                    <div class="card-title">Timeline Filters</div>
+                    <div class="surface-section-copy">Narrow the timeline by event type, actor, or time window.</div>
                 </div>
-                <div id="audit-actor-stats"></div>
             </div>
-        </div>
-        <div class="card">
-            <div class="card-header">
-                <span class="card-title">Audit Timeline</span>
+            <div class="audit-filter-grid">
+                <select class="filter-select" id="audit-event-filter">
+                    <option value="">All Events</option>
+                    <option value="command_submitted">Command Submitted</option>
+                    <option value="command_approved">Command Approved</option>
+                    <option value="command_rejected">Command Rejected</option>
+                    <option value="command_executed">Command Executed</option>
+                    <option value="command_failed">Command Failed</option>
+                    <option value="command_blocked">Command Blocked</option>
+                    <option value="command_timeout">Command Timeout</option>
+                    <option value="approval_granted">Approval Granted</option>
+                    <option value="rule_created">Rule Created</option>
+                    <option value="rule_updated">Rule Updated</option>
+                    <option value="rule_deleted">Rule Deleted</option>
+                    <option value="rule_pack_installed">Rule Pack Installed</option>
+                    <option value="rule_pack_upgrade_previewed">Rule Pack Upgrade Previewed</option>
+                    <option value="rule_pack_upgraded">Rule Pack Upgraded</option>
+                </select>
+                <input type="text" class="form-input" id="audit-actor-filter" placeholder="Filter by actor">
+                <input type="date" class="form-input" id="audit-start-date" title="Start date">
+                <input type="date" class="form-input" id="audit-end-date" title="End date">
+                <div class="audit-filter-actions">
+                    <button class="btn btn-secondary" id="audit-apply-btn">Apply</button>
+                    <button class="btn btn-secondary" id="audit-clear-btn">Clear</button>
+                </div>
+            </div>
+        </section>
+        <section class="surface-grid-2 fade-in audit-stats-grid">
+            <div class="surface-card">
+                <div class="surface-section-head">
+                    <div>
+                        <div class="card-title">Event Distribution</div>
+                        <div class="surface-section-copy">Most common audit events across the current instance.</div>
+                    </div>
+                </div>
+                <div id="audit-event-stats" class="audit-chip-cloud"></div>
+            </div>
+            <div class="surface-card">
+                <div class="surface-section-head">
+                    <div>
+                        <div class="card-title">Top Actors</div>
+                        <div class="surface-section-copy">Who is driving the most governance activity.</div>
+                    </div>
+                </div>
+                <div id="audit-actor-stats" class="audit-actor-list"></div>
+            </div>
+        </section>
+        <section class="surface-card fade-in">
+            <div class="surface-section-head">
+                <div>
+                    <div class="card-title">Audit Timeline</div>
+                    <div class="surface-section-copy">Chronological event stream with actor and entity context.</div>
+                </div>
                 <span id="audit-count" class="text-sm text-muted"></span>
             </div>
             <div id="audit-timeline" class="timeline"></div>
-            <div id="audit-pagination" style="display:flex;justify-content:center;gap:12px;margin-top:16px"></div>
-        </div>
+            <div id="audit-pagination" class="audit-pagination"></div>
+        </section>
     `;
     
     // Initialize event listeners
@@ -115,9 +142,9 @@ async function loadAuditStats() {
         const eventStatsEl = document.getElementById('audit-event-stats');
         if (stats.eventTypes && stats.eventTypes.length > 0) {
             eventStatsEl.innerHTML = stats.eventTypes.map(et => `
-                <div style="padding:6px 12px;background:rgba(56,189,248,0.08);border-radius:6px;border:1px solid var(--border-color)">
-                    <span style="font-size:12px;color:var(--text-secondary)">${formatEventType(et.event_type)}</span>
-                    <span style="font-size:14px;font-weight:600;color:var(--accent-cyan);margin-left:8px">${et.count}</span>
+                <div class="audit-chip">
+                    <span class="audit-chip-label">${formatEventType(et.event_type)}</span>
+                    <span class="audit-chip-value">${et.count}</span>
                 </div>
             `).join('');
         } else {
@@ -128,9 +155,9 @@ async function loadAuditStats() {
         const actorStatsEl = document.getElementById('audit-actor-stats');
         if (stats.topActors && stats.topActors.length > 0) {
             actorStatsEl.innerHTML = stats.topActors.map((a, i) => `
-                <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;${i < stats.topActors.length - 1 ? 'border-bottom:1px solid var(--border-color)' : ''}">
-                    <span style="font-size:13px">${escapeHtml(a.actor)}</span>
-                    <span class="text-muted text-sm">${a.count} events</span>
+                <div class="audit-actor-row ${i < stats.topActors.length - 1 ? 'is-divided' : ''}">
+                    <span class="audit-actor-name">${escapeHtml(a.actor)}</span>
+                    <span class="audit-actor-count">${a.count} events</span>
                 </div>
             `).join('');
         } else {
@@ -169,7 +196,7 @@ async function loadAuditLog() {
         const data = await response.json();
         
         if (!data.entries || data.entries.length === 0) {
-            timeline.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📋</div><div class="empty-state-text">No audit entries found</div></div>';
+            timeline.innerHTML = renderEmptyState('No audit entries found', 'audit');
             countEl.textContent = '';
             document.getElementById('audit-pagination').innerHTML = '';
             return;
@@ -179,25 +206,25 @@ async function loadAuditLog() {
         
         // Event type icons and colors
         const eventConfig = {
-            command_submitted: { icon: '📤', class: '' },
-            command_approved: { icon: '✅', class: 'event-approved' },
-            command_rejected: { icon: '❌', class: 'event-rejected' },
-            command_executed: { icon: '⚡', class: '' },
-            command_failed: { icon: '💥', class: 'event-rejected' },
-            command_blocked: { icon: '🚫', class: 'event-command_blocked' },
-            command_timeout: { icon: '⏰', class: '' },
-            approval_granted: { icon: '👍', class: 'event-approved' },
-            rule_created: { icon: '📝', class: '' },
-            rule_updated: { icon: '✏️', class: '' },
-            rule_deleted: { icon: '🗑️', class: 'event-rejected' }
-            ,
-            rule_pack_installed: { icon: '📦', class: '' },
-            rule_pack_upgrade_previewed: { icon: '🧪', class: '' },
-            rule_pack_upgraded: { icon: '⬆️', class: '' }
+            command_submitted: { icon: renderEventChip('SB'), class: '' },
+            command_approved: { icon: renderEventChip('OK', 'approved'), class: 'event-approved' },
+            command_rejected: { icon: renderEventChip('NO', 'rejected'), class: 'event-rejected' },
+            command_executed: { icon: renderEventChip('EX'), class: '' },
+            command_failed: { icon: renderEventChip('ER', 'error'), class: 'event-rejected' },
+            command_blocked: { icon: renderEventChip('BL', 'warning'), class: 'event-command_blocked' },
+            command_timeout: { icon: renderEventChip('TM', 'warning'), class: '' },
+            approval_granted: { icon: renderEventChip('AP', 'approved'), class: 'event-approved' },
+            rule_created: { icon: renderEventChip('RC'), class: '' },
+            rule_updated: { icon: renderEventChip('RU'), class: '' },
+            rule_deleted: { icon: renderEventChip('RD', 'rejected'), class: 'event-rejected' },
+            rule_pack_installed: { icon: renderEventChip('PK'), class: '' },
+            rule_pack_upgrade_previewed: { icon: renderEventChip('PV'), class: '' },
+            rule_pack_upgraded: { icon: renderEventChip('UP'), class: '' },
+            exec_key_rotated: { icon: renderEventChip('KR', 'warning'), class: '' }
         };
         
         timeline.innerHTML = data.entries.map(entry => {
-            const config = eventConfig[entry.event_type] || { icon: '📌', class: '' };
+            const config = eventConfig[entry.event_type] || { icon: renderEventChip('EV'), class: '' };
             const detailsHtml = formatAuditDetails(entry);
             
             return `
@@ -205,8 +232,8 @@ async function loadAuditLog() {
                     <div class="timeline-time">${formatTime(entry.created_at)}</div>
                     <div class="timeline-title">
                         ${config.icon} ${formatEventType(entry.event_type)}
-                        ${entry.entity_type ? `<span class="text-muted" style="font-weight:400">· ${entry.entity_type}</span>` : ''}
-                        ${entry.redacted ? `<span class="status-badge rejected" style="margin-left:8px">Redacted</span>` : ''}
+                        ${entry.entity_type ? `<span class="timeline-entity">· ${entry.entity_type}</span>` : ''}
+                        ${entry.redacted ? `<span class="status-badge rejected">Redacted</span>` : ''}
                     </div>
                     <div class="timeline-details">
                         <div><strong>Actor:</strong> ${escapeHtml(entry.actor)}</div>
@@ -220,7 +247,7 @@ async function loadAuditLog() {
         renderAuditPagination(data.entries.length);
         
     } catch (e) {
-        timeline.innerHTML = '<div class="empty-state"><div class="empty-state-text" style="color:var(--accent-red)">Failed to load audit log</div></div>';
+        timeline.innerHTML = renderEmptyState('Failed to load audit log', 'blocked');
         countEl.textContent = '';
     }
 }
@@ -286,7 +313,7 @@ function renderAuditPagination(currentCount) {
     
     const startItem = auditState.offset + 1;
     const endItem = auditState.offset + currentCount;
-    html += `<span class="text-muted" style="padding:8px 16px">Showing ${startItem}-${endItem}</span>`;
+    html += `<span class="audit-pagination-range">Showing ${startItem}-${endItem}</span>`;
     
     if (hasNext) {
         html += `<button class="btn btn-secondary" onclick="auditNextPage()">Next →</button>`;

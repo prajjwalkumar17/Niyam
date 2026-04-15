@@ -33,6 +33,20 @@ Rendered files now include:
 - reverse proxy template
 - example env file
 
+If you want an interactive prep flow for self-hosted installs, run:
+
+```bash
+./oneclick-setup.sh
+```
+
+Choose `Self-hosted prep`. The script can:
+
+- generate deployment secrets
+- write `.deploy/niyam.env`
+- initialize the database
+- render service and proxy templates
+- optionally stage the app into `NIYAM_INSTALL_DIR`
+
 ## Stage An Install
 
 ```bash

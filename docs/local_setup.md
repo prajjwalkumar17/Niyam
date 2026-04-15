@@ -25,6 +25,32 @@ Related docs:
 npm install
 ```
 
+If you want the repo to generate secrets, write an env file, initialize the database, and optionally start the server for you:
+
+```bash
+./oneclick-setup.sh
+```
+
+or:
+
+```bash
+npm run setup:interactive
+```
+
+Choose `Local development` when prompted. The script writes `.env.local`, runs dependency/bootstrap steps, and can launch Niyam directly.
+
+If you already have `.env.local` and only want to start the app, run the same script and choose:
+
+- `Start existing server env and stream logs`
+
+That mode:
+
+- reuses an existing env file
+- skips setup and DB prompts
+- starts Niyam immediately
+- streams logs to the terminal
+- writes a timestamped log file under `.local/logs/`
+
 If `better-sqlite3` fails to install, rebuild it explicitly:
 
 ```bash
@@ -83,6 +109,19 @@ Run the wrapper-routing smoke test:
 npm run smoke:wrapper
 ```
 
+Populate the dashboard with safe demo data, then clean it back out:
+
+```bash
+npm run smoke:dashboard
+npm run smoke:dashboard:reset
+```
+
+Notes:
+
+- `smoke:dashboard` is meant for UI review, not runtime correctness alone
+- it writes a cleanup state file to `.local/dashboard-smoke-state.json`
+- `smoke:dashboard:reset` removes only artifacts tagged by that smoke flow
+
 Run operator-grade backup and benchmark tooling locally:
 
 ```bash
@@ -104,6 +143,7 @@ What they cover:
 - command submission and execution
 - redaction of sensitive values in stored command history and audit data
 - rule-driven `WRAPPER` execution mode
+- dashboard-safe demo command and audit population plus cleanup
 - backup and restore scripts
 - exec-key rotation flow
 - load and soak runners against the live API

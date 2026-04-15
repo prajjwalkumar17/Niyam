@@ -4,6 +4,7 @@
 .env.*
 .deploy/
 .dist/
+.local/
 *.log
 *.pid
 .DS_Store

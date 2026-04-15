@@ -3,7 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Niyam - Command Governance</title>
+    <meta name="theme-color" content="#08111d">
+    <title>Niyam | Command Control</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/niyam-mark.svg">
+    <link rel="shortcut icon" href="/assets/niyam-mark.svg">
+    <link rel="apple-touch-icon" href="/assets/niyam-mark.svg">
     <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
@@ -11,40 +15,53 @@
     <nav class="sidebar">
         <div class="sidebar-header">
             <div class="logo">
-                <span class="logo-icon">⚡</span>
-                <span class="logo-text">Niyam</span>
+                <img src="/assets/niyam-mark.svg" alt="Niyam" class="logo-mark">
+                <div class="logo-copy">
+                    <span class="logo-text">Niyam</span>
+                    <div class="logo-subtitle">Command Control</div>
+                </div>
             </div>
-            <div class="logo-subtitle">Command Governance</div>
+            <p class="brand-note">Approval first. Isolation where it matters. Audit every decision.</p>
         </div>
         <ul class="nav-links">
             <li>
                 <a href="#dashboard" class="nav-link" data-page="dashboard">
-                    <span class="nav-icon">📊</span>
+                    <span class="nav-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24"><path d="M4 19h16M7 15v-4M12 15V7M17 15v-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                    </span>
                     <span class="nav-text">Dashboard</span>
                 </a>
             </li>
             <li>
                 <a href="#pending" class="nav-link" data-page="pending">
-                    <span class="nav-icon">⏳</span>
+                    <span class="nav-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24"><path d="M8 4h8M8 20h8M8 4c0 4 8 4 8 8s-8 4-8 8M16 4c0 4-8 4-8 8s8 4 8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </span>
                     <span class="nav-text">Pending</span>
                     <span class="badge" id="pending-badge" style="display:none">0</span>
                 </a>
             </li>
             <li>
                 <a href="#history" class="nav-link" data-page="history">
-                    <span class="nav-icon">📜</span>
+                    <span class="nav-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24"><path d="M8 5h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8a3 3 0 1 1 0-6h10M8 5a3 3 0 1 0 0 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </span>
                     <span class="nav-text">History</span>
                 </a>
             </li>
             <li>
                 <a href="#rules" class="nav-link" data-page="rules">
-                    <span class="nav-icon">📋</span>
+                    <span class="nav-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24"><path d="M9 4h6l1 2h3v14H5V6h3l1-2Zm0 6h6M9 12h6M9 16h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </span>
                     <span class="nav-text">Rules</span>
                 </a>
             </li>
             <li>
                 <a href="#audit" class="nav-link" data-page="audit">
-                    <span class="nav-icon">🔍</span>
+                    <span class="nav-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24"><path d="M10.5 18a7.5 7.5 0 1 1 5.3-2.2L20 20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </span>
                     <span class="nav-text">Audit Log</span>
                 </a>
             </li>
@@ -61,16 +78,25 @@
     <main class="main-content">
         <!-- Top Bar -->
         <header class="topbar">
-            <h1 class="page-title" id="page-title">Dashboard</h1>
+            <div class="page-heading">
+                <div class="page-kicker">Self-hosted command governance</div>
+                <h1 class="page-title" id="page-title">Dashboard</h1>
+            </div>
             <div class="topbar-actions">
-                <div class="session-pill" id="session-pill">Not signed in</div>
-                <button class="btn btn-secondary" id="auto-refresh-toggle" onclick="toggleAutoRefresh()" title="Toggle auto refresh">
-                    🔄 Auto: ON
+                <div class="session-pill has-tooltip tooltip-below" id="session-pill" data-tooltip="Current signed-in dashboard identity.">Not signed in</div>
+                <button class="btn btn-secondary has-tooltip tooltip-below" id="auto-refresh-toggle" onclick="toggleAutoRefresh()" data-tooltip="Refreshes the current page every 10 seconds without leaving your current view.">
+                    <span class="btn-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 0 1-13.7 5.7M4 12a8 8 0 0 1 13.7-5.7M17 4v4h-4M7 20v-4h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </span>
+                    Auto: ON
                 </button>
-                <button class="btn btn-primary" id="submit-command-btn">
-                    <span class="btn-icon">+</span> Submit Command
+                <button class="btn btn-primary has-tooltip tooltip-below" id="submit-command-btn" data-tooltip="Open the command submission flow with policy simulation before execution.">
+                    <span class="btn-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                    </span>
+                    Submit Command
                 </button>
-                <button class="btn btn-secondary" id="logout-btn" style="display:none">
+                <button class="btn btn-secondary has-tooltip tooltip-below tooltip-right" id="logout-btn" style="display:none" data-tooltip="End the current local admin session.">
                     Sign Out
                 </button>
             </div>
@@ -151,7 +177,13 @@
     <div class="modal-overlay" id="login-overlay" style="display:none">
         <div class="modal login-modal">
             <div class="modal-header">
-                <h2>Sign In</h2>
+                <div class="login-brand">
+                    <img src="/assets/niyam-mark.svg" alt="Niyam" class="login-brand-mark">
+                    <div>
+                        <div class="login-brand-name">Niyam</div>
+                        <div class="login-brand-copy">Local operator access</div>
+                    </div>
+                </div>
             </div>
             <div class="modal-body">
                 <div class="form-group">
