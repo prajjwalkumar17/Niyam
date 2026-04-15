@@ -4,6 +4,8 @@
 
 const { classifyRisk, getApprovalThreshold } = require('./risk-classifier');
 const { matchRules } = require('./rules');
+const { config } = require('../config');
+const { redactForPreview } = require('../security/redaction');
 
 class PolicyEngine {
     constructor(db) {
@@ -27,6 +29,8 @@ class PolicyEngine {
         
         // Classify risk based on rules and built-in classifier
         const classification = classifyRisk(fullCommand, matchedRules);
+        const executionModeRule = matchedRules.find(r => r.rule_type === 'execution_mode' && r.execution_mode);
+        const executionMode = executionModeRule ? executionModeRule.execution_mode : config.EXEC_DEFAULT_MODE;
         
         // Get approval thresholds
         const threshold = getApprovalThreshold(classification.riskLevel);
@@ -38,9 +42,11 @@ class PolicyEngine {
                 allowed: false,
                 reason: `Command blocked by denylist rule: ${denied.name}`,
                 riskLevel: classification.riskLevel,
+                classifier: classification,
                 matchedRules,
                 threshold,
-                autoApproved: false
+                autoApproved: false,
+                executionMode
             };
         }
         
@@ -51,9 +57,11 @@ class PolicyEngine {
                 allowed: true,
                 reason: 'Auto-approved: matches allowlist rule',
                 riskLevel: classification.riskLevel,
+                classifier: classification,
                 matchedRules,
                 threshold,
-                autoApproved: true
+                autoApproved: true,
+                executionMode
             };
         }
         
@@ -61,10 +69,22 @@ class PolicyEngine {
             allowed: true,
             reason: `Command classified as ${classification.riskLevel} risk`,
             riskLevel: classification.riskLevel,
+            executionMode,
+            classifier: classification,
             matchedRules,
             threshold,
             autoApproved: classification.riskLevel === 'LOW',
             requiresApproval: classification.riskLevel !== 'LOW'
+        };
+    }
+
+    simulate({ command, args = [], metadata = {}, workingDir = null }) {
+        const evaluation = this.evaluate(command, args);
+        return {
+            ...evaluation,
+            workingDir,
+            matchedRules: summarizeMatchedRules(evaluation.matchedRules),
+            redactionPreview: redactForPreview({ command, args, metadata })
         };
     }
 
@@ -96,3 +116,14 @@ class PolicyEngine {
 }
 
 module.exports = PolicyEngine;
+
+function summarizeMatchedRules(rules) {
+    return (rules || []).map(rule => ({
+        id: rule.id,
+        name: rule.name,
+        rule_type: rule.rule_type,
+        priority: rule.priority,
+        risk_level: rule.risk_level || null,
+        execution_mode: rule.execution_mode || null
+    }));
+}

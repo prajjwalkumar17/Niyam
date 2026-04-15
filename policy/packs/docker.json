@@ -1,0 +1,44 @@
+{
+  "id": "docker",
+  "name": "Docker",
+  "version": "1.0.0",
+  "description": "Baseline governance rules for common docker operations.",
+  "rules": [
+    {
+      "pack_rule_id": "docker-readonly",
+      "name": "Docker Inspection",
+      "description": "Inspection and log access stay low risk.",
+      "rule_type": "pattern",
+      "pattern": "^docker\\s+(ps|images|inspect|logs)\\b",
+      "risk_level": "LOW",
+      "priority": 210
+    },
+    {
+      "pack_rule_id": "docker-medium",
+      "name": "Docker Build and Compose Up",
+      "description": "Builds and compose up require approval.",
+      "rule_type": "pattern",
+      "pattern": "^docker\\s+(build|compose\\s+up|run)\\b",
+      "risk_level": "MEDIUM",
+      "priority": 240
+    },
+    {
+      "pack_rule_id": "docker-high-risk",
+      "name": "Docker High-Risk Commands",
+      "description": "Privileged runs and destructive prune/rm are high risk.",
+      "rule_type": "pattern",
+      "pattern": "^docker\\s+(exec|run\\b.*--privileged|rm\\b.*-f|system\\s+prune|container\\s+prune|volume\\s+prune)\\b",
+      "risk_level": "HIGH",
+      "priority": 330
+    },
+    {
+      "pack_rule_id": "docker-wrap-high-risk",
+      "name": "Wrap Privileged Docker Commands",
+      "description": "Force privileged or exec operations through wrapper mode.",
+      "rule_type": "execution_mode",
+      "pattern": "^docker\\s+(exec|run\\b.*--privileged)\\b",
+      "execution_mode": "WRAPPER",
+      "priority": 430
+    }
+  ]
+}

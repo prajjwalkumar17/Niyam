@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Niyam backup timer
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=15m
+Unit=__SERVICE_NAME__-backup.service
+
+[Install]
+WantedBy=timers.target

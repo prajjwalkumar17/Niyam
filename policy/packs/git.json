@@ -1,0 +1,44 @@
+{
+  "id": "git",
+  "name": "Git",
+  "version": "1.0.0",
+  "description": "Baseline governance rules for common git operations.",
+  "rules": [
+    {
+      "pack_rule_id": "git-readonly",
+      "name": "Git Read Operations",
+      "description": "Read-only git commands stay low risk.",
+      "rule_type": "pattern",
+      "pattern": "^git\\s+(status|diff|log|show|fetch|pull)\\b",
+      "risk_level": "LOW",
+      "priority": 210
+    },
+    {
+      "pack_rule_id": "git-mutation",
+      "name": "Git Mutation Operations",
+      "description": "Merges, rebases, commits, and tags require approval.",
+      "rule_type": "pattern",
+      "pattern": "^git\\s+(merge|rebase|commit|tag)\\b",
+      "risk_level": "MEDIUM",
+      "priority": 220
+    },
+    {
+      "pack_rule_id": "git-force-push",
+      "name": "Git Force Push",
+      "description": "Force pushes are treated as high risk.",
+      "rule_type": "pattern",
+      "pattern": "^git\\s+push\\b.*(?:--force|-f)\\b",
+      "risk_level": "HIGH",
+      "priority": 300
+    },
+    {
+      "pack_rule_id": "git-destructive-reset-wrap",
+      "name": "Wrap Hard Reset",
+      "description": "Force hard resets into wrapper mode.",
+      "rule_type": "execution_mode",
+      "pattern": "^git\\s+reset\\s+--hard\\b",
+      "execution_mode": "WRAPPER",
+      "priority": 400
+    }
+  ]
+}

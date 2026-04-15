@@ -1,0 +1,44 @@
+{
+  "id": "terraform",
+  "name": "Terraform",
+  "version": "1.0.0",
+  "description": "Baseline governance rules for terraform planning and apply flows.",
+  "rules": [
+    {
+      "pack_rule_id": "terraform-readonly",
+      "name": "Terraform Read and Plan",
+      "description": "Formatting, validation, and plan stay low risk.",
+      "rule_type": "pattern",
+      "pattern": "^terraform\\s+(fmt|validate|plan)\\b",
+      "risk_level": "LOW",
+      "priority": 210
+    },
+    {
+      "pack_rule_id": "terraform-init",
+      "name": "Terraform Init",
+      "description": "Init is medium risk because it mutates local state.",
+      "rule_type": "pattern",
+      "pattern": "^terraform\\s+init\\b",
+      "risk_level": "MEDIUM",
+      "priority": 250
+    },
+    {
+      "pack_rule_id": "terraform-high-risk",
+      "name": "Terraform Apply and Destroy",
+      "description": "Apply, destroy, and state mutation are high risk.",
+      "rule_type": "pattern",
+      "pattern": "^terraform\\s+(apply|destroy|state\\s+rm|import)\\b",
+      "risk_level": "HIGH",
+      "priority": 350
+    },
+    {
+      "pack_rule_id": "terraform-wrap-apply",
+      "name": "Wrap Terraform Apply and Destroy",
+      "description": "Force apply and destroy into wrapper mode.",
+      "rule_type": "execution_mode",
+      "pattern": "^terraform\\s+(apply|destroy)\\b",
+      "execution_mode": "WRAPPER",
+      "priority": 450
+    }
+  ]
+}

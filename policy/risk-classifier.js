@@ -97,6 +97,16 @@ function classifyRisk(command, matchedRules = []) {
         };
     }
 
+    const patternRule = matchedRules.find(r => r.rule_type === 'pattern' && r.risk_level);
+    if (patternRule) {
+        return {
+            riskLevel: patternRule.risk_level,
+            source: 'rule_pattern',
+            matchedRule: patternRule.name,
+            confidence: 'high'
+        };
+    }
+
     // Check patterns from highest to lowest risk
     for (const level of ['HIGH', 'MEDIUM', 'LOW']) {
         for (const pattern of RISK_PATTERNS[level]) {

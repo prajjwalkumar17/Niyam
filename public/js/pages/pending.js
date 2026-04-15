@@ -4,32 +4,31 @@
 
 function renderPending(container) {
     container.innerHTML = `
-        <div class="filters">
-            <select class="filter-select" id="pending-risk-filter">
-                <option value="">All Risk Levels</option>
-                <option value="HIGH">High Risk</option>
-                <option value="MEDIUM">Medium Risk</option>
-                <option value="LOW">Low Risk</option>
-            </select>
-        </div>
-        <div class="table-container">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Command</th>
-                        <th>Risk</th>
-                        <th>Requester</th>
-                        <th>Approvals</th>
-                        <th>Timeout</th>
-                        <th>Submitted</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="pending-table-body">
-                    <tr><td colspan="7" style="text-align:center;padding:40px">Loading...</td></tr>
-                </tbody>
-            </table>
-        </div>
+        <section class="workspace-header fade-in">
+            <div class="workspace-header-copy">
+                <div class="workspace-kicker">Approval Queue</div>
+                <p class="workspace-subtitle">Review pending commands with time windows, requester identity, and approval state visible up front.</p>
+            </div>
+            <div class="workspace-controls">
+                <select class="filter-select" id="pending-risk-filter">
+                    <option value="">All Risk Levels</option>
+                    <option value="HIGH">High Risk</option>
+                    <option value="MEDIUM">Medium Risk</option>
+                    <option value="LOW">Low Risk</option>
+                </select>
+            </div>
+        </section>
+        <section class="surface-section fade-in">
+            <div class="surface-section-head">
+                <div>
+                    <div class="card-title">Pending Commands</div>
+                    <div class="surface-section-copy">Commands still waiting for human approval or multi-step consensus.</div>
+                </div>
+            </div>
+            <div class="command-stream" id="pending-list">
+                ${renderEmptyState('Loading pending commands...', 'pending')}
+            </div>
+        </section>
     `;
     
     document.getElementById('pending-risk-filter').addEventListener('change', loadPendingPage);
@@ -44,35 +43,46 @@ async function loadPendingPage() {
         let url = `${API_BASE}/commands?status=pending&limit=50`;
         if (riskFilter) url += `&riskLevel=${riskFilter}`;
         
-        const response = await fetch(url);
+        const response = await apiFetch(url);
         const data = await response.json();
         
-        const tbody = document.getElementById('pending-table-body');
+        const list = document.getElementById('pending-list');
         
         if (!data.commands || data.commands.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state"><div class="empty-state-icon">✅</div><div class="empty-state-text">No pending commands</div></div></td></tr>';
+            list.innerHTML = renderEmptyState('No pending commands', 'done');
             return;
         }
         
-        tbody.innerHTML = data.commands.map(cmd => `
-            <tr class="fade-in">
-                <td><code style="color:var(--accent-cyan)">${escapeHtml(cmd.command)}</code></td>
-                <td><span class="risk-badge ${cmd.risk_level.toLowerCase()}">${cmd.risk_level}</span></td>
-                <td>${escapeHtml(cmd.requester)}</td>
-                <td>${cmd.approval_count}/${cmd.required_approvals}</td>
-                <td>${renderTimer(cmd.timeout_at, cmd.created_at, 'ring')}</td>
-                <td class="text-sm text-muted">${timeAgo(cmd.created_at)}</td>
-                <td>
+        list.innerHTML = data.commands.map(cmd => `
+            <article class="command-stream-card fade-in">
+                <div class="command-stream-head">
+                    <div class="command-stream-main">
+                        <div class="command-stream-badges">
+                            <span class="risk-badge ${cmd.risk_level.toLowerCase()}">${cmd.risk_level}</span>
+                            <span class="status-badge pending">Pending</span>
+                        </div>
+                        <div class="command-stream-title"><code>${escapeHtml(formatCommandLine(cmd))}</code></div>
+                        <div class="command-stream-subtitle">${escapeHtml(cmd.requester)} · ${timeAgo(cmd.created_at)} · ${cmd.approval_count}/${cmd.required_approvals} approvals</div>
+                    </div>
+                    <div class="command-stream-timer">${renderTimer(cmd.timeout_at, cmd.created_at, 'ring')}</div>
+                </div>
+                <div class="command-stream-meta-row">
+                    <span class="command-stream-meta-pill">Requester · ${escapeHtml(cmd.requester)}</span>
+                    <span class="command-stream-meta-pill">Approvals · ${cmd.approval_count}/${cmd.required_approvals}</span>
+                    <span class="command-stream-meta-pill">Window · ${formatTimeout(cmd.timeout_at)}</span>
+                    ${cmd.rationale_required ? '<span class="command-stream-meta-pill">Rationale required</span>' : ''}
+                </div>
+                <div class="command-stream-actions">
                     <button class="btn btn-success btn-sm review-btn"
                         data-id="${cmd.id}"
                         data-risk="${cmd.risk_level}"
-                        data-command="${encodeURIComponent(cmd.command)}">Review</button>
-                </td>
-            </tr>
+                        data-command="${encodeURIComponent(cmd.command)}">Review Command</button>
+                </div>
+            </article>
         `).join('');
 
         // Attach click handlers safely (avoids inline onclick escaping issues)
-        tbody.querySelectorAll('.review-btn').forEach(btn => {
+        list.querySelectorAll('.review-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 const id = btn.dataset.id;
                 const risk = btn.dataset.risk;
@@ -81,7 +91,7 @@ async function loadPendingPage() {
             });
         });
     } catch (e) {
-        document.getElementById('pending-table-body').innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--accent-red)">Failed to load</td></tr>';
+        document.getElementById('pending-list').innerHTML = renderEmptyState('Failed to load pending commands', 'blocked');
     }
 }
 
@@ -99,4 +109,9 @@ function isExpiringSoon(isoString) {
     if (!isoString) return false;
     const diff = new Date(isoString) - new Date();
     return diff > 0 && diff < 3600000; // Less than 1 hour
+}
+
+function formatCommandLine(cmd) {
+    const args = Array.isArray(cmd.args) ? cmd.args.filter(Boolean) : [];
+    return [cmd.command, ...args].join(' ').trim();
 }

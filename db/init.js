@@ -3,11 +3,14 @@
  */
 
 const Database = require('better-sqlite3');
-const path = require('path');
 const fs = require('fs');
+const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 
-const DB_PATH = path.join(__dirname, '..', 'data', 'niyam.db');
+const { config } = require('../config');
+const { runMigrations } = require('./migrations');
+
+const DB_PATH = config.DB_PATH;
 const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
 
 // Ensure data directory exists
@@ -25,6 +28,7 @@ function initializeDatabase() {
     // Read and execute schema
     const schema = fs.readFileSync(SCHEMA_PATH, 'utf8');
     db.exec(schema);
+    runMigrations(db);
     
     console.log('Database schema initialized');
     
@@ -142,15 +146,38 @@ function seedRules(db) {
             pattern: '(pr|issue|repo|branch|workflow)\\s+(view|list)',
             risk_level: 'LOW',
             priority: 80
+        },
+        {
+            id: uuidv4(),
+            name: 'Sample Wrapper Rule',
+            description: 'Example execution_mode rule. Disabled by default; enable and adapt the pattern to force wrapper mode for matched commands.',
+            rule_type: 'execution_mode',
+            pattern: 'rm\\s+-rf',
+            execution_mode: 'WRAPPER',
+            enabled: 0,
+            priority: 110
         }
     ];
     
+    const existingNames = new Set(db.prepare('SELECT name FROM rules').all().map(rule => rule.name));
     const insertRule = db.prepare(`
-        INSERT OR IGNORE INTO rules (id, name, description, rule_type, pattern, risk_level, enabled, priority, created_at, updated_at)
-        VALUES (@id, @name, @description, @rule_type, @pattern, @risk_level, 1, @priority, ?, ?)
+        INSERT INTO rules (id, name, description, rule_type, pattern, risk_level, execution_mode, enabled, priority, created_at, updated_at)
+        VALUES (@id, @name, @description, @rule_type, @pattern, @risk_level, @execution_mode, @enabled, @priority, ?, ?)
     `);
     
     for (const rule of defaultRules) {
+        if (existingNames.has(rule.name)) {
+            continue;
+        }
+        if (rule.enabled === undefined) {
+            rule.enabled = 1;
+        }
+        if (!('risk_level' in rule)) {
+            rule.risk_level = null;
+        }
+        if (!('execution_mode' in rule)) {
+            rule.execution_mode = null;
+        }
         insertRule.run(rule, now, now);
     }
     
@@ -163,9 +190,9 @@ function seedApprovers(db) {
     const defaultApprovers = [
         {
             id: uuidv4(),
-            name: 'Forger Agent',
+            name: 'Default Agent',
             type: 'agent',
-            identifier: 'forger',
+            identifier: Object.keys(config.AGENT_TOKENS)[0] || 'forger',
             can_approve_high: 1,
             can_approve_medium: 1
         },
@@ -173,7 +200,7 @@ function seedApprovers(db) {
             id: uuidv4(),
             name: 'Dashboard Admin',
             type: 'role',
-            identifier: 'admin',
+            identifier: config.ADMIN_IDENTIFIER,
             can_approve_high: 1,
             can_approve_medium: 1
         },
@@ -187,12 +214,16 @@ function seedApprovers(db) {
         }
     ];
     
+    const existingIdentifiers = new Set(db.prepare('SELECT identifier FROM approvers').all().map(approver => approver.identifier));
     const insertApprover = db.prepare(`
-        INSERT OR IGNORE INTO approvers (id, name, type, identifier, enabled, can_approve_high, can_approve_medium, created_at)
+        INSERT INTO approvers (id, name, type, identifier, enabled, can_approve_high, can_approve_medium, created_at)
         VALUES (@id, @name, @type, @identifier, 1, @can_approve_high, @can_approve_medium, ?)
     `);
     
     for (const approver of defaultApprovers) {
+        if (existingIdentifiers.has(approver.identifier)) {
+            continue;
+        }
         insertApprover.run(approver, now);
     }
     

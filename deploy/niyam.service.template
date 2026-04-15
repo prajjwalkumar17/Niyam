@@ -1,0 +1,28 @@
+[Unit]
+Description=Niyam - CLI Command Governance System
+After=network.target
+
+[Service]
+Type=simple
+User=__RUN_USER__
+Group=__RUN_GROUP__
+WorkingDirectory=__INSTALL_DIR__
+ExecStart=__NODE_BIN__ server.js
+Environment=NODE_ENV=production
+Environment=NIYAM_PORT=__PORT__
+Environment=NIYAM_DATA_DIR=__DATA_DIR__
+Environment=NIYAM_ADMIN_PASSWORD=__ADMIN_PASSWORD__
+Environment=NIYAM_EXEC_ALLOWED_ROOTS=__EXEC_ALLOWED_ROOTS__
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=__SERVICE_NAME__
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=__DATA_DIR__
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

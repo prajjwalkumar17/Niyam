@@ -1,0 +1,130 @@
+# Test Report
+
+Date: 2026-04-15
+
+This report captures the latest end-to-end verification run for Niyam after adding:
+
+- policy simulation
+- built-in rule packs
+- storage-time secret redaction
+- encrypted raw execution payloads
+- request validation on write endpoints
+- versioned schema migrations
+- automated backup and restore
+- exec-key rotation
+- load and soak runners
+
+## Commands Run
+
+```bash
+npm test
+npm run smoke
+npm run smoke:wrapper
+npm run smoke:dashboard
+npm run smoke:dashboard:reset
+```
+
+## Results
+
+### `npm test`
+
+Status: Passed
+
+Covered cases:
+
+- `policy simulation returns server-truth evaluation`
+- `write endpoints reject invalid payloads`
+- `built-in rule pack install is idempotent and influences simulation`
+- `secret redaction sanitizes stored command, output, and audit history`
+- `versioned migrations are recorded in schema_migrations`
+- `backup and restore scripts preserve the database state`
+- `exec key rotation preserves delayed execution payloads`
+- `load and soak scripts complete successfully against the live API`
+
+Summary:
+
+```text
+8 passed, 0 failed
+```
+
+### `npm run smoke`
+
+Status: Passed
+
+Observed result:
+
+```text
+Smoke test passed on port 3410
+```
+
+### `npm run smoke:wrapper`
+
+Status: Passed
+
+Observed result:
+
+```text
+Wrapper smoke test passed on port 3410
+```
+
+### `npm run smoke:dashboard`
+
+Status: Passed
+
+Observed result:
+
+```text
+Created 4 safe demo commands for the live dashboard:
+- 1 LOW completed
+- 1 MEDIUM completed
+- 1 MEDIUM pending
+- 1 HIGH pending
+State file written to .local/dashboard-smoke-state.json
+```
+
+### `npm run smoke:dashboard:reset`
+
+Status: Passed
+
+Observed result:
+
+```text
+Removed smoke artifacts from the live dashboard:
+- 4 commands
+- 1 approval
+- 3 rules
+- 10 related audit entries
+State file removed
+```
+
+## What Was Verified
+
+- server boot and health endpoint
+- admin login and session flow
+- metrics endpoint access
+- command submission and execution
+- policy simulation endpoint behavior
+- request validation failures on write endpoints
+- built-in rule pack install and policy effect
+- redaction of submitted secrets in stored command history
+- redaction of execution output
+- redaction of audit and export data
+- rule-driven `WRAPPER` execution mode
+- dashboard-safe demo data population for visual UI review
+- targeted cleanup of dashboard smoke artifacts
+- versioned schema migration tracking
+- automated backup and restore flow
+- exec-key rotation with preserved delayed execution
+- load and soak runner success against a live instance
+
+## Current Outcome
+
+The implemented simulation, rule-pack, and redaction features are working end to end in this environment based on both:
+
+- live HTTP tests in `node:test`
+- operator-style smoke tests
+
+## Notes
+
+- This report reflects the current local workspace state at the time of execution.
+- Historical rows created before the redaction rollout are not covered by these tests.

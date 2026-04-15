@@ -106,6 +106,14 @@ class ExecutionGuard {
         
         return { success: true };
     }
+
+    kill(commandId, killedBy = 'system') {
+        const result = this.runner.kill(commandId);
+        if (result.success && this.broadcast) {
+            this.broadcast('command_killed', { id: commandId, killedBy });
+        }
+        return result;
+    }
 }
 
 module.exports = ExecutionGuard;

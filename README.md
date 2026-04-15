@@ -1,106 +1,188 @@
-# Niyam - CLI Command Governance System
+<p align="center">
+  <img src="./public/assets/niyam-mark.svg" alt="Niyam" width="108">
+</p>
 
-A full-stack CLI command approval and execution system for Forger agents with risk classification, approval workflows, and comprehensive audit trails.
+<h1 align="center">Niyam</h1>
 
-## Features
+<p align="center">
+  Approval-first command control for developer agents and operator teams.
+</p>
 
-- **Command Classification**: Automatic risk assessment (HIGH/MEDIUM/LOW)
-- **Approval Workflow**: Multi-approver support with deny/approve actions
-- **Real-time Updates**: WebSocket-based dashboard with live command status
-- **Policy Engine**: Configurable rules for command matching and auto-actions
-- **Audit Trail**: Complete logging of all actions and decisions
-- **Dark Mode Dashboard**: Modern, responsive UI
+<p align="center">
+  Self-hosted. Policy-aware. Wrapper-capable. Audit-heavy.
+</p>
+
+## Why Niyam
+
+Agents are useful right up until they become invisible shells with too much reach.
+
+Niyam sits between:
+
+- the system that wants to run a command
+- the machine that would otherwise execute it blindly
+
+It gives you one explicit control plane for:
+
+- risk classification
+- approval gating
+- direct vs wrapper execution
+- audit, redaction, and operator recovery
+
+This is not a hosted approval SaaS. Niyam is a single-instance control layer you run in your own environment.
+
+## What It Solves
+
+- low-risk commands can move immediately
+- risky commands can stop for approval
+- sensitive commands can be forced through a wrapper or containerized path
+- dangerous patterns can be blocked entirely
+- every request, approval, execution, and rejection is recorded
+
+Examples:
+
+- `ls public` can resolve to `LOW` and auto-run
+- `git merge` can require approval and still stay `DIRECT`
+- `gh workflow run` can require approval and resolve to `WRAPPER`
+- destructive filesystem patterns can be denied or isolated by rule
+
+## Product Loop
+
+```mermaid
+flowchart LR
+    A["Agent or Operator"] --> B["Simulate Policy"]
+    B --> C["Classify Risk"]
+    C --> D["Require Approval or Auto-Run"]
+    D --> E["Resolve DIRECT or WRAPPER"]
+    E --> F["Execute with Redaction"]
+    F --> G["Audit, Metrics, Alerts"]
+```
+
+## Core Capabilities
+
+- server-truth policy simulation before submission
+- rule-driven approvals for `LOW`, `MEDIUM`, and `HIGH`
+- rule-driven `DIRECT` vs `WRAPPER` execution
+- two-person approval support for high-risk flows
+- storage-time secret redaction with encrypted raw execution payloads
+- persistent admin sessions and bearer-token agent access
+- structured logs, metrics, alerts, audit history, and exports
+- backup, restore, exec-key rotation, load, soak, and smoke tooling
+
+## Prebuilt Policy Templates
+
+Niyam ships with installable policy templates for tooling teams already use:
+
+- `gh`
+- `git`
+- `docker`
+- `kubectl`
+- `terraform`
+
+These templates are starting points for:
+
+- risk classification
+- approval defaults
+- wrapper routing for sensitive operations
+- faster operator setup without hand-writing everything from zero
+
+Install a pack, review the generated policy, then tune from a usable baseline.
+
+## Upcoming Channels
+
+Planned operator-facing approval channels:
+
+- Slack approval prompts
+- Discord approval prompts
+- chat-driven approve or reject actions with rationale capture
+- high-risk notifications for pending and wrapper-routed operations
+
+The goal is to let teams approve from trusted collaboration surfaces while Niyam remains the system of record.
 
 ## Quick Start
 
 ```bash
-# Install dependencies
 npm install
-
-# Start server
-npm start
-
-# Open dashboard
-open http://localhost:3333
+NIYAM_ADMIN_PASSWORD=change-me NIYAM_EXEC_DATA_KEY=local-dev-key npm start
 ```
 
-## API Endpoints
+Open `http://localhost:3000` and sign in with:
 
-### Commands
-- `POST /api/commands` - Submit a new command
-- `GET /api/commands` - List commands (filterable)
-- `GET /api/commands/:id` - Get command details
-- `POST /api/commands/:id/approve` - Approve a command
-- `POST /api/commands/:id/deny` - Deny a command
-- `POST /api/commands/:id/kill` - Kill a running command
+- username: `admin` unless `NIYAM_ADMIN_USERNAME` is set
+- password: the value of `NIYAM_ADMIN_PASSWORD`
 
-### Rules
-- `GET /api/rules` - List all rules
-- `POST /api/rules` - Create/update a rule
-- `DELETE /api/rules/:id` - Delete a rule
-
-### Audit
-- `GET /api/audit` - Get audit log
-
-### Stats
-- `GET /api/stats` - Get dashboard statistics
-
-## Command Submission
-
-```json
-POST /api/commands
-{
-  "command": "npm",
-  "args": ["install", "express"],
-  "workingDir": "/home/user/project",
-  "requesterId": "agent-001",
-  "requesterName": "Forger Agent",
-  "timeoutSeconds": 300
-}
-```
-
-## Risk Classification
-
-The policy engine classifies commands based on:
-
-### HIGH Risk
-- Commands with elevated privileges (sudo, doas)
-- Package installations/removals
-- Service management (systemctl)
-- Disk operations (dd, mkfs)
-- Recursive deletions
-
-### MEDIUM Risk
-- Network downloads (curl, wget)
-- Git push operations
-- Docker commands
-- SSH/SCP operations
-
-### LOW Risk
-- Read-only commands (cat, ls, head)
-- Git status/log/diff
-- Version checks
-
-## Configuration
-
-Environment variables:
-- `NIYAM_PORT` - Server port (default: 3333)
-- `NIYAM_DB` - SQLite database path (default: ./db/niyam.db)
-
-## Systemd Installation
+If you want the guided bootstrap:
 
 ```bash
-# Copy service file
-sudo cp niyam.service /etc/systemd/system/
-
-# Create data directory
-sudo mkdir -p /var/lib/niyam
-
-# Enable and start
-sudo systemctl enable niyam
-sudo systemctl start niyam
+./oneclick-setup.sh
 ```
 
-## License
+or:
 
-MIT
+```bash
+npm run setup:interactive
+```
+
+The setup flow can also start an existing env and stream logs directly.
+
+## Docs
+
+Start here:
+
+- [Local setup](./docs/local_setup.md)
+- [Usage guide](./docs/usage.md)
+- [Feature guide](./docs/features.md)
+
+Operators:
+
+- [Configuration reference](./docs/configuration.md)
+- [Self-hosted deployment](./docs/deployment.md)
+- [Backup and restore](./docs/backup_restore.md)
+- [Exec key rotation](./docs/key_rotation.md)
+- [Load and soak testing](./docs/load_testing.md)
+
+Integrators and reviewers:
+
+- [API reference](./docs/api_reference.md)
+- [Security](./docs/security.md)
+- [Contributing](./docs/contributing.md)
+- [Public release checklist](./docs/public_release.md)
+- [Test report](./docs/test_report.md)
+
+## Verify
+
+```bash
+npm test
+npm run smoke
+npm run smoke:wrapper
+npm run smoke:dashboard
+npm run smoke:dashboard:reset
+npm run load
+npm run soak
+```
+
+What that covers:
+
+- policy simulation against the real server
+- pack install and rule matching
+- wrapper routing
+- redaction in history, output, and audit data
+- dashboard demo-data populate and cleanup
+- backup, restore, and exec-key rotation
+- burst and sustained benchmark traffic
+
+## Smoke Flows
+
+- `npm run smoke`
+  Core runtime verification.
+- `npm run smoke:wrapper`
+  Rule-driven wrapper path verification.
+- `npm run smoke:dashboard`
+  Safe demo data for UI review.
+- `npm run smoke:dashboard:reset`
+  Removes only dashboard smoke artifacts.
+
+## Operating Thesis
+
+Niyam is for teams that want agents to be useful without becoming unaccountable root shells.
+
+It gives you one narrow, explicit place to enforce approval, isolation, auditability, and recovery before command execution turns into incident response.

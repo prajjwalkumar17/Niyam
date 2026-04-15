@@ -6,11 +6,16 @@
 const state = {
     currentPage: 'dashboard',
     ws: null,
+    principal: null,
+    initialized: false,
+    wsReconnectTimer: null,
     pendingCount: 0,
     currentPageRenderer: null,
     refreshInterval: null,
     timerInterval: null,
-    autoRefreshEnabled: localStorage.getItem('niyam.autoRefresh') !== 'off'
+    autoRefreshEnabled: localStorage.getItem('niyam.autoRefresh') !== 'off',
+    previewTimer: null,
+    previewSequence: 0
 };
 
 // API Base URL
@@ -19,32 +24,52 @@ const API_BASE = '/api';
 // Auto-refresh interval (ms)
 const AUTO_REFRESH_MS = 10000;
 
+const ICONS = {
+    dashboard: '<svg viewBox="0 0 24 24"><path d="M4 19h16M7 15v-4M12 15V7M17 15v-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+    pending: '<svg viewBox="0 0 24 24"><path d="M8 4h8M8 20h8M8 4c0 4 8 4 8 8s-8 4-8 8M16 4c0 4-8 4-8 8s8 4 8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    history: '<svg viewBox="0 0 24 24"><path d="M8 5h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8a3 3 0 1 1 0-6h10M8 5a3 3 0 1 0 0 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    rules: '<svg viewBox="0 0 24 24"><path d="M9 4h6l1 2h3v14H5V6h3l1-2Zm0 6h6M9 12h6M9 16h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    audit: '<svg viewBox="0 0 24 24"><path d="M10.5 18a7.5 7.5 0 1 1 5.3-2.2L20 20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    activity: '<svg viewBox="0 0 24 24"><path d="M5 12h4l2-4 3 8 2-4h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    done: '<svg viewBox="0 0 24 24"><path d="m5 12 4.2 4L19 6.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    blocked: '<svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+    package: '<svg viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Zm0 0v9m8-4.5-8 4.5-8-4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+};
+
+function renderUiIcon(name, className = '') {
+    const svg = ICONS[name] || ICONS.activity;
+    return `<span class="${className}">${svg}</span>`;
+}
+
+function renderEmptyState(message, icon = 'activity') {
+    return `
+        <div class="empty-state">
+            <div class="empty-state-icon">${ICONS[icon] || ICONS.activity}</div>
+            <div class="empty-state-text">${message}</div>
+        </div>
+    `;
+}
+
+function renderEventChip(label, tone = '') {
+    return `<span class="icon-chip ${tone}">${label}</span>`;
+}
+
 // ═══════════════════════════════════════════
 // Initialization
 // ═══════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', () => {
-    initNavigation();
-    initWebSocket();
-    initSubmitModal();
+    bootstrapApp();
+});
+
+async function bootstrapApp() {
+    initAuthUi();
     updateAutoRefreshButton();
 
-    // Restore current page from URL hash or last saved page
-    const pageFromHash = (window.location.hash || '').replace('#', '');
-    const savedPage = localStorage.getItem('niyam.currentPage');
-    const initialPage = ['dashboard', 'pending', 'history', 'rules', 'audit'].includes(pageFromHash)
-        ? pageFromHash
-        : (['dashboard', 'pending', 'history', 'rules', 'audit'].includes(savedPage) ? savedPage : 'dashboard');
-
-    navigateTo(initialPage);
-
-    // Support browser back/forward and manual hash edits
-    window.addEventListener('hashchange', () => {
-        const p = (window.location.hash || '').replace('#', '');
-        if (['dashboard', 'pending', 'history', 'rules', 'audit'].includes(p) && p !== state.currentPage) {
-            navigateTo(p);
-        }
-    });
-});
+    const restored = await restoreSession();
+    if (!restored) {
+        enterUnauthenticatedState('Dashboard access requires a local admin session.');
+    }
+}
 
 // ═══════════════════════════════════════════
 // Navigation
@@ -57,6 +82,159 @@ function initNavigation() {
             navigateTo(page);
         });
     });
+}
+
+function initAuthUi() {
+    document.getElementById('login-btn').addEventListener('click', submitLogin);
+    document.getElementById('login-password').addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            submitLogin();
+        }
+    });
+    document.getElementById('logout-btn').addEventListener('click', logout);
+}
+
+async function restoreSession() {
+    try {
+        const response = await fetch(`${API_BASE}/auth/me`);
+        if (!response.ok) {
+            return false;
+        }
+
+        const result = await response.json();
+        enterAuthenticatedState(result.principal);
+        return true;
+    } catch (error) {
+        return false;
+    }
+}
+
+function enterAuthenticatedState(principal) {
+    state.principal = principal;
+    hideLoginOverlay();
+    updateSessionUi();
+
+    if (!state.initialized) {
+        initNavigation();
+        initSubmitModal();
+        state.initialized = true;
+
+        const pageFromHash = (window.location.hash || '').replace('#', '');
+        const savedPage = localStorage.getItem('niyam.currentPage');
+        const initialPage = ['dashboard', 'pending', 'history', 'rules', 'audit'].includes(pageFromHash)
+            ? pageFromHash
+            : (['dashboard', 'pending', 'history', 'rules', 'audit'].includes(savedPage) ? savedPage : 'dashboard');
+
+        window.addEventListener('hashchange', () => {
+            const page = (window.location.hash || '').replace('#', '');
+            if (state.principal && ['dashboard', 'pending', 'history', 'rules', 'audit'].includes(page) && page !== state.currentPage) {
+                navigateTo(page);
+            }
+        });
+
+        navigateTo(initialPage);
+    } else {
+        navigateTo(state.currentPage || 'dashboard');
+    }
+
+    document.getElementById('cmd-requester').value = principal.identifier;
+
+    if (!state.ws || state.ws.readyState === WebSocket.CLOSED) {
+        initWebSocket();
+    }
+}
+
+function enterUnauthenticatedState(message) {
+    state.principal = null;
+    updateSessionUi();
+    closeApprovalModal();
+    closeModal();
+    stopRealtime();
+    showLoginOverlay(message);
+}
+
+function updateSessionUi() {
+    const pill = document.getElementById('session-pill');
+    const logoutBtn = document.getElementById('logout-btn');
+    const submitBtn = document.getElementById('submit-command-btn');
+
+    if (!state.principal) {
+        pill.textContent = 'Not signed in';
+        logoutBtn.style.display = 'none';
+        submitBtn.disabled = true;
+        return;
+    }
+
+    pill.textContent = `${state.principal.identifier} · ${state.principal.type}`;
+    logoutBtn.style.display = 'inline-flex';
+    submitBtn.disabled = false;
+}
+
+function showLoginOverlay(message) {
+    document.getElementById('login-overlay').style.display = 'flex';
+    setLoginStatus(message || 'Dashboard access requires a local admin session.');
+    document.getElementById('login-password').focus();
+}
+
+function hideLoginOverlay() {
+    document.getElementById('login-overlay').style.display = 'none';
+    setLoginStatus('Dashboard access requires a local admin session.');
+    document.getElementById('login-password').value = '';
+}
+
+function setLoginStatus(message) {
+    document.getElementById('login-status').textContent = message;
+}
+
+async function submitLogin() {
+    const username = document.getElementById('login-username').value.trim();
+    const password = document.getElementById('login-password').value;
+
+    if (!username || !password) {
+        setLoginStatus('Username and password are required.');
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        const result = await response.json();
+
+        if (!response.ok) {
+            setLoginStatus(result.error || 'Login failed.');
+            return;
+        }
+
+        enterAuthenticatedState(result.principal);
+        showNotification('Signed in', 'success');
+    } catch (error) {
+        setLoginStatus('Network error while signing in.');
+    }
+}
+
+async function logout() {
+    try {
+        await fetch(`${API_BASE}/auth/logout`, { method: 'POST' });
+    } catch (error) {
+        // The local state still needs to be cleared on logout failure.
+    }
+
+    enterUnauthenticatedState('Signed out.');
+}
+
+async function apiFetch(path, options = {}) {
+    const url = path.startsWith('/api') ? path : `${API_BASE}${path}`;
+    const response = await fetch(url, options);
+
+    if (response.status === 401) {
+        enterUnauthenticatedState('Session expired. Sign in again.');
+        throw new Error('Authentication required');
+    }
+
+    return response;
 }
 
 function navigateTo(page) {
@@ -120,6 +298,19 @@ function startAutoRefresh() {
     startTimerUpdates();
 }
 
+function stopRealtime() {
+    if (state.refreshInterval) clearInterval(state.refreshInterval);
+    if (state.timerInterval) clearInterval(state.timerInterval);
+    if (state.wsReconnectTimer) clearTimeout(state.wsReconnectTimer);
+    state.refreshInterval = null;
+    state.timerInterval = null;
+    state.wsReconnectTimer = null;
+    if (state.ws) {
+        state.ws.close();
+        state.ws = null;
+    }
+}
+
 function toggleAutoRefresh() {
     state.autoRefreshEnabled = !state.autoRefreshEnabled;
     localStorage.setItem('niyam.autoRefresh', state.autoRefreshEnabled ? 'on' : 'off');
@@ -140,7 +331,7 @@ function toggleAutoRefresh() {
 function updateAutoRefreshButton() {
     const btn = document.getElementById('auto-refresh-toggle');
     if (!btn) return;
-    btn.textContent = state.autoRefreshEnabled ? '🔄 Auto: ON' : '⏸️ Auto: OFF';
+    btn.innerHTML = `${renderUiIcon('activity', 'btn-icon')}Auto: ${state.autoRefreshEnabled ? 'ON' : 'OFF'}`;
 }
 
 function silentlyRefreshCurrentPage() {
@@ -268,6 +459,10 @@ function renderTimer(timeoutAt, createdAt, type = 'ring') {
 // WebSocket
 // ═══════════════════════════════════════════
 function initWebSocket() {
+    if (!state.principal) {
+        return;
+    }
+
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${location.host}/ws`;
     
@@ -284,7 +479,9 @@ function initWebSocket() {
         
         state.ws.onclose = () => {
             updateConnectionStatus(false);
-            setTimeout(connect, 3000);
+            if (state.principal) {
+                state.wsReconnectTimer = setTimeout(connect, 3000);
+            }
         };
         
         state.ws.onerror = () => {
@@ -356,7 +553,11 @@ function handleWebSocketMessage(msg) {
 }
 
 function updatePendingBadge() {
-    fetch(`${API_BASE}/commands?status=pending&limit=0`)
+    if (!state.principal) {
+        return;
+    }
+
+    apiFetch('/commands?status=pending&limit=0')
         .then(r => r.json())
         .then(data => {
             const count = data.total || 0;
@@ -407,13 +608,17 @@ function showNotification(message, type = 'info') {
 // ═══════════════════════════════════════════
 function initSubmitModal() {
     document.getElementById('submit-command-btn').addEventListener('click', () => {
+        if (!state.principal) {
+            showLoginOverlay('Sign in to submit commands.');
+            return;
+        }
+        document.getElementById('cmd-requester').value = state.principal.identifier;
         document.getElementById('submit-modal').style.display = 'flex';
     });
-    
-    // Live risk preview
-    document.getElementById('cmd-input').addEventListener('input', (e) => {
-        previewRisk(e.target.value);
-    });
+
+    document.getElementById('cmd-input').addEventListener('input', schedulePolicyPreview);
+    document.getElementById('cmd-args').addEventListener('input', schedulePolicyPreview);
+    document.getElementById('cmd-working-dir').addEventListener('input', schedulePolicyPreview);
 }
 
 function closeModal() {
@@ -421,66 +626,155 @@ function closeModal() {
     document.getElementById('cmd-input').value = '';
     document.getElementById('cmd-args').value = '';
     document.getElementById('cmd-timeout').value = '';
-    document.getElementById('risk-preview').style.display = 'none';
+    document.getElementById('cmd-working-dir').value = '';
+    hidePolicyPreview();
 }
 
-function previewRisk(command) {
+function hidePolicyPreview() {
+    if (state.previewTimer) {
+        clearTimeout(state.previewTimer);
+        state.previewTimer = null;
+    }
+
+    document.getElementById('risk-preview').style.display = 'none';
+    document.getElementById('risk-preview-text').textContent = '';
+    document.getElementById('risk-preview-extra').textContent = '';
+    document.getElementById('risk-preview-rules').textContent = '';
+}
+
+function schedulePolicyPreview() {
+    if (state.previewTimer) {
+        clearTimeout(state.previewTimer);
+    }
+
+    const command = document.getElementById('cmd-input').value.trim();
+    if (!command) {
+        hidePolicyPreview();
+        return;
+    }
+
+    state.previewTimer = setTimeout(() => {
+        previewPolicy();
+    }, 300);
+}
+
+async function previewPolicy() {
+    const command = document.getElementById('cmd-input').value.trim();
+    const args = parseArgsInput(document.getElementById('cmd-args').value.trim());
+    const workingDir = document.getElementById('cmd-working-dir').value.trim();
     const preview = document.getElementById('risk-preview');
     const label = document.getElementById('risk-preview-label');
     const text = document.getElementById('risk-preview-text');
-    
-    if (!command.trim()) {
-        preview.style.display = 'none';
+    const extra = document.getElementById('risk-preview-extra');
+    const rules = document.getElementById('risk-preview-rules');
+    const executionBadge = document.getElementById('execution-preview-badge');
+
+    if (!command) {
+        hidePolicyPreview();
         return;
     }
-    
-    const risk = classifyRiskLocal(command);
-    preview.style.display = 'flex';
-    label.className = `risk-label ${risk.level.toLowerCase()}`;
-    label.textContent = risk.level;
-    text.textContent = risk.description;
-}
 
-function classifyRiskLocal(command) {
-    const highPatterns = [/pr\s+merge/i, /push\s+.*--force/i, /branch\s+delete/i, /repo\s+delete/i, /workflow\s+run/i, /secret\s+set/i];
-    const medPatterns = [/pr\s+create/i, /issue\s+close/i, /branch\s+create/i, /repo\s+edit/i];
-    const lowPatterns = [/pr\s+view/i, /issue\s+view/i, /repo\s+view/i, /branch\s+list/i, /workflow\s+list/i];
-    
-    for (const p of highPatterns) {
-        if (p.test(command)) return { level: 'HIGH', description: 'Requires 2 approvers + rationale' };
+    const sequence = ++state.previewSequence;
+    preview.style.display = 'flex';
+    label.className = 'risk-label';
+    label.textContent = '...';
+    executionBadge.className = 'status-badge';
+    executionBadge.textContent = '...';
+    text.textContent = 'Simulating policy...';
+    extra.textContent = '';
+    rules.textContent = '';
+
+    try {
+        const response = await apiFetch('/policy/simulate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                command,
+                args,
+                workingDir: workingDir || null,
+                metadata: { source: 'dashboard-preview' }
+            })
+        });
+        const result = await response.json();
+
+        if (sequence !== state.previewSequence) {
+            return;
+        }
+
+        if (!response.ok) {
+            throw new Error(result.error || 'Simulation failed');
+        }
+
+        label.className = `risk-label ${String(result.riskLevel || 'MEDIUM').toLowerCase()}`;
+        label.textContent = result.riskLevel || 'MEDIUM';
+        executionBadge.className = `status-badge ${String(result.executionMode || 'DIRECT').toLowerCase() === 'wrapper' ? 'executing' : 'approved'}`;
+        executionBadge.textContent = result.executionMode || 'DIRECT';
+        text.textContent = result.reason || 'Policy evaluated';
+
+        const approvalBits = [];
+        if (!result.allowed) {
+            approvalBits.push('Blocked by policy');
+        } else if (result.autoApproved) {
+            approvalBits.push('Auto-approved');
+        } else {
+            approvalBits.push(`${result.threshold?.requiredApprovals || 0} approval(s) required`);
+        }
+        if (result.threshold?.rationaleRequired) {
+            approvalBits.push('Rationale required');
+        }
+        if (result.redactionPreview?.commandChanged || result.redactionPreview?.argsChanged || result.redactionPreview?.metadataChanged) {
+            approvalBits.push('Sensitive values will be redacted');
+        }
+        extra.textContent = approvalBits.join(' · ');
+
+        const matchedRules = Array.isArray(result.matchedRules) ? result.matchedRules.map(rule => rule.name) : [];
+        if (matchedRules.length > 0) {
+            rules.textContent = `Matched rules: ${matchedRules.join(', ')}`;
+        } else if (result.classifier?.source) {
+            rules.textContent = `Classifier: ${result.classifier.source}`;
+        } else {
+            rules.textContent = '';
+        }
+    } catch (error) {
+        if (sequence !== state.previewSequence) {
+            return;
+        }
+        label.className = 'risk-label medium';
+        label.textContent = 'ERR';
+        executionBadge.className = 'status-badge rejected';
+        executionBadge.textContent = 'N/A';
+        text.textContent = 'Policy simulation unavailable';
+        extra.textContent = error.message || 'Failed to evaluate command policy';
+        rules.textContent = '';
     }
-    for (const p of medPatterns) {
-        if (p.test(command)) return { level: 'MEDIUM', description: 'Requires 1 approver' };
-    }
-    for (const p of lowPatterns) {
-        if (p.test(command)) return { level: 'LOW', description: 'Auto-approved' };
-    }
-    return { level: 'MEDIUM', description: 'Default classification (no pattern match)' };
 }
 
 async function submitCommand() {
     const command = document.getElementById('cmd-input').value.trim();
     const argsStr = document.getElementById('cmd-args').value.trim();
-    const requester = document.getElementById('cmd-requester').value.trim();
     const timeoutHours = document.getElementById('cmd-timeout').value.trim();
+    const workingDir = document.getElementById('cmd-working-dir').value.trim();
     
     if (!command) {
         showNotification('Command is required', 'error');
         return;
     }
     
-    const args = argsStr ? argsStr.split(',').map(a => a.trim()) : [];
+    const args = parseArgsInput(argsStr);
     
-    const body = { command, args, requester };
+    const body = { command, args };
     if (timeoutHours) {
         const hours = parseFloat(timeoutHours);
         if (hours > 0 && hours <= 168) {
             body.timeoutHours = hours;
         }
     }
+    if (workingDir) {
+        body.workingDir = workingDir;
+    }
     
     try {
-        const response = await fetch(`${API_BASE}/commands`, {
+        const response = await apiFetch('/commands', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body)
@@ -532,11 +826,10 @@ async function processApproval(decision) {
     const endpoint = decision === 'approve' ? 'approve' : 'reject';
     
     try {
-        const response = await fetch(`${API_BASE}/approvals/${currentApprovalCommandId}/${endpoint}`, {
+        const response = await apiFetch(`/approvals/${currentApprovalCommandId}/${endpoint}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                approver: 'admin',
                 rationale: rationale || null
             })
         });
@@ -583,4 +876,8 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+function parseArgsInput(argsStr) {
+    return argsStr ? argsStr.split(',').map(arg => arg.trim()).filter(Boolean) : [];
 }
