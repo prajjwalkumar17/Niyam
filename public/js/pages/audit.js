@@ -57,9 +57,13 @@ function renderAudit(container) {
                     <option value="rule_pack_installed">Rule Pack Installed</option>
                     <option value="rule_pack_upgrade_previewed">Rule Pack Upgrade Previewed</option>
                     <option value="rule_pack_upgraded">Rule Pack Upgraded</option>
+                    <option value="signup_requested">Signup Requested</option>
+                    <option value="signup_approved">Signup Approved</option>
+                    <option value="signup_rejected">Signup Rejected</option>
                     <option value="user_created">User Created</option>
                     <option value="user_updated">User Updated</option>
                     <option value="user_password_reset">User Password Reset</option>
+                    <option value="password_changed">Password Changed</option>
                 </select>
                 <input type="text" class="form-input" id="audit-actor-filter" placeholder="Filter by actor">
                 <input type="date" class="form-input" id="audit-start-date" title="Start date">
@@ -233,6 +237,10 @@ async function loadAuditLog() {
             rule_pack_installed: { icon: renderEventChip('PK'), class: '' },
             rule_pack_upgrade_previewed: { icon: renderEventChip('PV'), class: '' },
             rule_pack_upgraded: { icon: renderEventChip('UP'), class: '' },
+            signup_requested: { icon: renderEventChip('SR'), class: '' },
+            signup_approved: { icon: renderEventChip('SA', 'approved'), class: 'event-approved' },
+            signup_rejected: { icon: renderEventChip('SX', 'rejected'), class: 'event-rejected' },
+            password_changed: { icon: renderEventChip('PW'), class: '' },
             exec_key_rotated: { icon: renderEventChip('KR', 'warning'), class: '' }
         };
         

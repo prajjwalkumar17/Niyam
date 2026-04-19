@@ -7,6 +7,9 @@ const state = {
     currentPage: 'dashboard',
     ws: null,
     principal: null,
+    authConfig: {
+        allowSelfSignup: false
+    },
     initialized: false,
     wsReconnectTimer: null,
     pendingCount: 0,
@@ -26,6 +29,7 @@ const AUTO_REFRESH_MS = 10000;
 
 const ICONS = {
     dashboard: '<svg viewBox="0 0 24 24"><path d="M4 19h16M7 15v-4M12 15V7M17 15v-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+    workspace: '<svg viewBox="0 0 24 24"><path d="M4 6h16v12H4zM8 10h8M8 14h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     pending: '<svg viewBox="0 0 24 24"><path d="M8 4h8M8 20h8M8 4c0 4 8 4 8 8s-8 4-8 8M16 4c0 4-8 4-8 8s8 4 8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     history: '<svg viewBox="0 0 24 24"><path d="M8 5h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8a3 3 0 1 1 0-6h10M8 5a3 3 0 1 0 0 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     dispatches: '<svg viewBox="0 0 24 24"><path d="M5 12h4l2-4 3 8 2-4h3M6 6h12M6 18h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -37,8 +41,8 @@ const ICONS = {
     package: '<svg viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Zm0 0v9m8-4.5-8 4.5-8-4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 };
 
-const ALL_PAGES = ['dashboard', 'pending', 'history', 'dispatches', 'rules', 'audit', 'users'];
-const DEFAULT_USER_PAGES = ['dashboard', 'pending', 'history'];
+const ALL_PAGES = ['dashboard', 'workspace', 'pending', 'history', 'dispatches', 'rules', 'audit', 'users'];
+const DEFAULT_USER_PAGES = ['dashboard', 'workspace', 'pending', 'history'];
 
 function renderUiIcon(name, className = '') {
     const svg = ICONS[name] || ICONS.activity;
@@ -66,6 +70,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function bootstrapApp() {
+    await loadAuthConfig();
     initAuthUi();
     updateAutoRefreshButton();
 
@@ -95,7 +100,44 @@ function initAuthUi() {
             submitLogin();
         }
     });
+    document.getElementById('show-signup-btn').addEventListener('click', openSignupOverlay);
+    document.getElementById('signup-back-btn').addEventListener('click', () => {
+        closeSignupOverlay();
+        showLoginOverlay('Sign in with a local Niyam account to continue.');
+    });
+    document.getElementById('signup-btn').addEventListener('click', submitSignupRequest);
+    document.getElementById('signup-password').addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            submitSignupRequest();
+        }
+    });
     document.getElementById('logout-btn').addEventListener('click', logout);
+    document.getElementById('change-password-btn').addEventListener('click', openPasswordModal);
+    document.getElementById('password-modal-close').addEventListener('click', closePasswordModal);
+    document.getElementById('password-cancel-btn').addEventListener('click', closePasswordModal);
+    document.getElementById('password-save-btn').addEventListener('click', submitPasswordChange);
+    document.getElementById('password-new').addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            submitPasswordChange();
+        }
+    });
+}
+
+async function loadAuthConfig() {
+    try {
+        const response = await fetch(`${API_BASE}/auth/config`);
+        if (!response.ok) {
+            return;
+        }
+
+        const result = await response.json();
+        state.authConfig = {
+            ...state.authConfig,
+            ...result
+        };
+    } catch (error) {
+        // Leave defaults in place.
+    }
 }
 
 async function restoreSession() {
@@ -156,6 +198,7 @@ function enterUnauthenticatedState(message) {
     updateNavigationForPrincipal();
     closeApprovalModal();
     closeModal();
+    closePasswordModal();
     stopRealtime();
     showLoginOverlay(message);
 }
@@ -163,34 +206,50 @@ function enterUnauthenticatedState(message) {
 function updateSessionUi() {
     const pill = document.getElementById('session-pill');
     const logoutBtn = document.getElementById('logout-btn');
+    const changePasswordBtn = document.getElementById('change-password-btn');
     const submitBtn = document.getElementById('submit-command-btn');
 
     if (!state.principal) {
         pill.textContent = 'Not signed in';
         logoutBtn.style.display = 'none';
+        changePasswordBtn.style.display = 'none';
         submitBtn.disabled = true;
         return;
     }
 
     pill.textContent = describePrincipal(state.principal);
     logoutBtn.style.display = 'inline-flex';
+    changePasswordBtn.style.display = state.principal.type === 'user' ? 'inline-flex' : 'none';
     submitBtn.disabled = false;
 }
 
 function showLoginOverlay(message) {
+    closeSignupOverlay();
     document.getElementById('login-overlay').style.display = 'flex';
+    updateAuthOverlayActions();
     setLoginStatus(message || 'Sign in with a local Niyam account to continue.');
     document.getElementById('login-password').focus();
 }
 
 function hideLoginOverlay() {
     document.getElementById('login-overlay').style.display = 'none';
+    document.getElementById('signup-overlay').style.display = 'none';
     setLoginStatus('Sign in with a local Niyam account to continue.');
     document.getElementById('login-password').value = '';
+    setSignupStatus('Your request stays pending until an admin approves it.');
+    document.getElementById('signup-password').value = '';
 }
 
 function setLoginStatus(message) {
     document.getElementById('login-status').textContent = message;
+}
+
+function setSignupStatus(message) {
+    document.getElementById('signup-status').textContent = message;
+}
+
+function updateAuthOverlayActions() {
+    document.getElementById('show-signup-btn').style.display = state.authConfig.allowSelfSignup ? 'inline-flex' : 'none';
 }
 
 async function submitLogin() {
@@ -222,6 +281,58 @@ async function submitLogin() {
     }
 }
 
+function openSignupOverlay() {
+    if (!state.authConfig.allowSelfSignup) {
+        return;
+    }
+
+    document.getElementById('login-overlay').style.display = 'none';
+    document.getElementById('signup-overlay').style.display = 'flex';
+    setSignupStatus('Your request stays pending until an admin approves it.');
+    document.getElementById('signup-username').focus();
+}
+
+function closeSignupOverlay() {
+    document.getElementById('signup-overlay').style.display = 'none';
+}
+
+async function submitSignupRequest() {
+    const username = document.getElementById('signup-username').value.trim();
+    const displayName = document.getElementById('signup-display-name').value.trim();
+    const password = document.getElementById('signup-password').value;
+
+    if (!username || !password) {
+        setSignupStatus('Username and password are required.');
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/signup-requests`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                username,
+                displayName: displayName || null,
+                password
+            })
+        });
+        const result = await response.json();
+
+        if (!response.ok) {
+            setSignupStatus(result.error || result.details?.join(', ') || 'Unable to submit signup request.');
+            return;
+        }
+
+        document.getElementById('signup-username').value = '';
+        document.getElementById('signup-display-name').value = '';
+        document.getElementById('signup-password').value = '';
+        closeSignupOverlay();
+        showLoginOverlay(`Access request submitted for ${result.username}. Wait for admin approval.`);
+    } catch (error) {
+        setSignupStatus('Network error while requesting access.');
+    }
+}
+
 async function logout() {
     try {
         await fetch(`${API_BASE}/auth/logout`, { method: 'POST' });
@@ -232,11 +343,58 @@ async function logout() {
     enterUnauthenticatedState('Signed out.');
 }
 
+function openPasswordModal() {
+    if (!state.principal || state.principal.type !== 'user') {
+        return;
+    }
+
+    document.getElementById('password-current').value = '';
+    document.getElementById('password-new').value = '';
+    document.getElementById('password-status').textContent = '';
+    document.getElementById('password-modal').style.display = 'flex';
+    document.getElementById('password-current').focus();
+}
+
+function closePasswordModal() {
+    document.getElementById('password-modal').style.display = 'none';
+}
+
+async function submitPasswordChange() {
+    const currentPassword = document.getElementById('password-current').value;
+    const newPassword = document.getElementById('password-new').value;
+
+    if (!currentPassword || !newPassword) {
+        document.getElementById('password-status').textContent = 'Current password and new password are required.';
+        return;
+    }
+
+    try {
+        const response = await apiFetch('/auth/change-password', {
+            allowUnauthorizedResponse: true,
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ currentPassword, newPassword })
+        });
+        const result = await response.json();
+
+        if (!response.ok) {
+            document.getElementById('password-status').textContent = result.error || result.details?.join(', ') || 'Password change failed.';
+            return;
+        }
+
+        closePasswordModal();
+        enterAuthenticatedState(result.principal);
+        showNotification('Password updated', 'success');
+    } catch (error) {
+        document.getElementById('password-status').textContent = 'Network error while changing password.';
+    }
+}
+
 async function apiFetch(path, options = {}) {
     const url = path.startsWith('/api') ? path : `${API_BASE}${path}`;
     const response = await fetch(url, options);
 
-    if (response.status === 401) {
+    if (response.status === 401 && !options.allowUnauthorizedResponse) {
         enterUnauthenticatedState('Session expired. Sign in again.');
         throw new Error('Authentication required');
     }
@@ -265,6 +423,7 @@ function navigateTo(page) {
     // Update page title
     const titles = {
         dashboard: 'Dashboard',
+        workspace: 'Workspace',
         pending: 'Pending Approvals',
         history: 'Command History',
         dispatches: 'Shell Dispatches',
@@ -280,6 +439,7 @@ function navigateTo(page) {
     
     switch (page) {
         case 'dashboard': renderDashboard(container); break;
+        case 'workspace': renderWorkspace(container); break;
         case 'pending': renderPending(container); break;
         case 'history': renderHistory(container); break;
         case 'dispatches': renderDispatches(container); break;
@@ -359,6 +519,7 @@ function silentlyRefreshCurrentPage() {
     
     switch (state.currentPage) {
         case 'dashboard': renderDashboard(container); break;
+        case 'workspace': renderWorkspace(container); break;
         case 'pending': renderPending(container); break;
         case 'history': renderHistory(container); break;
         case 'dispatches': renderDispatches(container); break;

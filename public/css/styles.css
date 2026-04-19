@@ -1339,6 +1339,76 @@ textarea.form-input {
     gap: 24px;
 }
 
+.workspace-detail-list {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.workspace-detail-row {
+    display: grid;
+    grid-template-columns: minmax(140px, 180px) 1fr;
+    gap: 16px;
+    padding-top: 14px;
+    border-top: 1px solid rgba(123, 182, 216, 0.08);
+}
+
+.workspace-detail-row:first-child {
+    padding-top: 0;
+    border-top: none;
+}
+
+.workspace-detail-label {
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.workspace-detail-value {
+    font-size: 13px;
+    color: var(--text-primary);
+    word-break: break-word;
+}
+
+.workspace-command-block {
+    margin-top: 18px;
+}
+
+.workspace-command-block:first-of-type {
+    margin-top: 0;
+}
+
+.workspace-command-title {
+    margin-bottom: 8px;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.workspace-command-pre {
+    overflow-x: auto;
+    padding: 16px 18px;
+    border-radius: 16px;
+    background: rgba(6, 13, 22, 0.88);
+    border: 1px solid rgba(123, 182, 216, 0.12);
+    color: var(--text-primary);
+    font-size: 12px;
+    line-height: 1.65;
+}
+
+.workspace-note {
+    margin-top: 18px;
+    padding: 14px 16px;
+    border-radius: 16px;
+    background: rgba(15, 23, 42, 0.46);
+    border: 1px solid rgba(123, 182, 216, 0.08);
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.6;
+}
+
 .command-stream {
     display: flex;
     flex-direction: column;
@@ -2018,6 +2088,10 @@ textarea.form-input {
     .workspace-controls {
         width: 100%;
         justify-content: flex-start;
+    }
+    .workspace-detail-row {
+        grid-template-columns: 1fr;
+        gap: 6px;
     }
     .dashboard-hero {
         padding: 22px 20px;

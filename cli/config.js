@@ -46,7 +46,7 @@ function loadCliConfig() {
     };
 }
 
-function ensureCliConfig(overrides = {}) {
+function ensureCliConfig(overrides = {}, options = {}) {
     const configPath = getConfigPath();
     const configDir = path.dirname(configPath);
     if (!fs.existsSync(configDir)) {
@@ -62,7 +62,7 @@ function ensureCliConfig(overrides = {}) {
         ...getDefaultCliConfig(),
         ...current,
         ...overrides,
-        ...getExplicitEnvOverrides()
+        ...(options.applyEnvOverrides === false ? {} : getExplicitEnvOverrides())
     };
     next.interactivePatterns = normalizeStringArray(next.interactivePatterns, DEFAULT_INTERACTIVE_PATTERNS);
     next.skipCommands = normalizeStringArray(next.skipCommands, ['niyam-cli']);

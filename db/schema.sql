@@ -102,6 +102,22 @@ CREATE TABLE IF NOT EXISTS local_users (
     metadata TEXT
 );
 
+CREATE TABLE IF NOT EXISTS signup_requests (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL,
+    display_name TEXT,
+    password_hash TEXT NOT NULL,
+    status TEXT NOT NULL,
+    decision_reason TEXT,
+    requested_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    reviewed_at TEXT,
+    reviewed_by TEXT,
+    user_id TEXT,
+    metadata TEXT,
+    FOREIGN KEY (user_id) REFERENCES local_users(id) ON DELETE SET NULL
+);
+
 -- Sessions table: persistent dashboard sessions
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
@@ -161,6 +177,9 @@ CREATE INDEX IF NOT EXISTS idx_rules_enabled ON rules(enabled);
 CREATE INDEX IF NOT EXISTS idx_rules_priority ON rules(priority DESC);
 CREATE INDEX IF NOT EXISTS idx_rules_managed_pack ON rules(managed_by_pack, managed_by_pack_rule_id);
 CREATE INDEX IF NOT EXISTS idx_local_users_enabled ON local_users(enabled);
+CREATE INDEX IF NOT EXISTS idx_signup_requests_status ON signup_requests(status);
+CREATE INDEX IF NOT EXISTS idx_signup_requests_username ON signup_requests(username);
+CREATE INDEX IF NOT EXISTS idx_signup_requests_requested_at ON signup_requests(requested_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_cli_dispatches_route ON cli_dispatches(route);
 CREATE INDEX IF NOT EXISTS idx_cli_dispatches_status ON cli_dispatches(status);

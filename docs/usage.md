@@ -5,6 +5,7 @@ This guide covers how teams use Niyam once it is running.
 Related docs:
 
 - [Local setup](./local_setup.md)
+- [CLI wrapper and team mode](./cli_wrapper.md)
 - [Feature guide](./features.md)
 - [API reference](./api_reference.md)
 - [Configuration reference](./configuration.md)
@@ -18,6 +19,11 @@ There are two main actors:
   They log into the dashboard, manage rules, review approvals, and inspect audit history.
 - Agents or automation clients
   They submit commands over the API using bearer tokens.
+
+There can also be local team users:
+
+- developers and approvers with their own dashboard accounts
+- optional self-signup requests when team mode is enabled
 
 ## Main Flows
 
@@ -82,6 +88,15 @@ Use it to:
 - inspect recent activity
 - preview pending commands
 
+### Workspace
+
+Use it to:
+
+- see the current signed-in identity
+- confirm whether team mode is enabled
+- copy the current CLI wrapper install and removal commands
+- inspect live instance details such as env file, allowed roots, and execution mode if you are an admin
+
 ### Pending
 
 Use it to:
@@ -120,6 +135,15 @@ Use it to:
 - export audit logs
 - inspect operational history
 - confirm where redaction occurred
+
+### Users
+
+Use it to:
+
+- create local users directly
+- reset local passwords
+- grant `MEDIUM` and `HIGH` approval capability
+- approve or reject signup requests when team mode is enabled
 
 ## API Usage
 
@@ -209,6 +233,26 @@ curl -b /tmp/niyam-cookies.txt \
 ```
 
 ## Agent Usage
+
+## CLI Wrapper Usage
+
+The CLI wrapper is the fastest way to make Niyam feel operational in day-to-day work.
+
+Typical local install:
+
+```bash
+cd /Users/prajjwal.kumar/Projects/Niyam
+npm run cli:install
+source ~/.zshrc
+```
+
+After install:
+
+- `niyam-on` enables interception in the current shell
+- `niyam-off` disables interception in the current shell
+- `npm run cli:remove` fully removes the wrapper from the shell rc file
+
+For the full workflow, see [CLI wrapper and team mode](./cli_wrapper.md).
 
 There is a small local client in [agent/client.js](/Users/prajjwal.kumar/Projects/Niyam/agent/client.js:1).
 

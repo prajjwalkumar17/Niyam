@@ -436,6 +436,34 @@ function validateUserPasswordPayload(body) {
     };
 }
 
+function validatePasswordChangePayload(body) {
+    const value = isPlainObject(body) ? body : {};
+    const errors = [];
+    const normalized = {};
+
+    if (typeof value.currentPassword !== 'string' || !value.currentPassword) {
+        errors.push('Current password is required');
+    } else if (value.currentPassword.length > 4096) {
+        errors.push('Current password is too long');
+    } else {
+        normalized.currentPassword = value.currentPassword;
+    }
+
+    if (typeof value.newPassword !== 'string' || !value.newPassword) {
+        errors.push('New password is required');
+    } else if (value.newPassword.length > 4096) {
+        errors.push('New password is too long');
+    } else {
+        normalized.newPassword = value.newPassword;
+    }
+
+    return {
+        valid: errors.length === 0,
+        errors,
+        value: normalized
+    };
+}
+
 function validatePackActionBody(body) {
     const value = isPlainObject(body) ? body : {};
     const mode = value.mode === undefined ? 'install_if_missing' : value.mode;
@@ -518,6 +546,7 @@ module.exports = {
     validateCliDispatchPayload,
     validateCommandPayload,
     validateLoginBody,
+    validatePasswordChangePayload,
     validatePackActionBody,
     validateRulePayload,
     validateUserPasswordPayload,

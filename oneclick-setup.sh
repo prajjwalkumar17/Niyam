@@ -29,6 +29,7 @@ SHOULD_OPEN_CLI_TERMINAL="n"
 BACKUP_PASSPHRASE=""
 REUSE_EXISTING_ENV="n"
 START_ONLY="n"
+TEAM_MODE="n"
 
 bold() {
     printf '\033[1m%s\033[0m\n' "$1"
@@ -261,6 +262,79 @@ normalize_exec_mode() {
     esac
 }
 
+env_flag_to_yes_no() {
+    case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
+        1|true|yes|on) printf 'y' ;;
+        *) printf 'n' ;;
+    esac
+}
+
+team_mode_env_value() {
+    if [[ "$TEAM_MODE" == "y" ]]; then
+        printf 'true'
+    else
+        printf 'false'
+    fi
+}
+
+prompt_team_mode_setting() {
+    TEAM_MODE=$(prompt_yes_no "Activate team mode (self-signup requests + admin approval)?" "${1:-n}")
+}
+
+apply_team_mode_to_env_file() {
+    local target=$1
+    local temp_file
+    temp_file=$(mktemp)
+
+    awk -v value="$(team_mode_env_value)" '
+        BEGIN { updated = 0 }
+        /^NIYAM_ENABLE_SELF_SIGNUP=/ {
+            print "NIYAM_ENABLE_SELF_SIGNUP=" value
+            updated = 1
+            next
+        }
+        { print }
+        END {
+            if (!updated) {
+                print "NIYAM_ENABLE_SELF_SIGNUP=" value
+            }
+        }
+    ' "$target" > "$temp_file"
+
+    mv "$temp_file" "$target"
+}
+
+sync_runtime_metadata_to_env_file() {
+    local target=$1
+    local temp_file
+    temp_file=$(mktemp)
+
+    awk -v profile="$PROFILE" -v env_file="$target" '
+        BEGIN { profile_updated = 0; env_updated = 0 }
+        /^NIYAM_PROFILE=/ {
+            print "NIYAM_PROFILE=" profile
+            profile_updated = 1
+            next
+        }
+        /^NIYAM_ENV_FILE=/ {
+            print "NIYAM_ENV_FILE='\''" env_file "'\''"
+            env_updated = 1
+            next
+        }
+        { print }
+        END {
+            if (!profile_updated) {
+                print "NIYAM_PROFILE=" profile
+            }
+            if (!env_updated) {
+                print "NIYAM_ENV_FILE='\''" env_file "'\''"
+            }
+        }
+    ' "$target" > "$temp_file"
+
+    mv "$temp_file" "$target"
+}
+
 load_existing_env() {
     set -a
     # shellcheck disable=SC1090
@@ -279,12 +353,18 @@ load_existing_env() {
     ADMIN_PASSWORD=${NIYAM_ADMIN_PASSWORD:-$ADMIN_PASSWORD}
     EXEC_DATA_KEY=${NIYAM_EXEC_DATA_KEY:-$EXEC_DATA_KEY}
     METRICS_TOKEN=${NIYAM_METRICS_TOKEN:-$METRICS_TOKEN}
+    TEAM_MODE=$(env_flag_to_yes_no "${NIYAM_ENABLE_SELF_SIGNUP:-}")
 }
 
 print_dashboard_access() {
     printf 'Dashboard access:\n'
     printf '  URL: http://localhost:%s\n' "$PORT"
     printf '  Username: %s\n' "$ADMIN_USERNAME"
+    if [[ "$TEAM_MODE" == "y" ]]; then
+        printf '  Team mode: enabled (self-signup requests require admin approval)\n'
+    else
+        printf '  Team mode: disabled (admin-created users only)\n'
+    fi
     if [[ -n "$ADMIN_PASSWORD" ]]; then
         printf '  Password: %s\n' "$ADMIN_PASSWORD"
     fi
@@ -337,6 +417,8 @@ write_env_file() {
 
     cat > "$target" <<EOF
 NODE_ENV=$(shell_quote "$( [[ "$PROFILE" == "local" ]] && printf 'development' || printf 'production' )")
+NIYAM_PROFILE=$(shell_quote "$PROFILE")
+NIYAM_ENV_FILE=$(shell_quote "$target")
 NIYAM_PORT=$(shell_quote "$PORT")
 NIYAM_ADMIN_USERNAME=admin
 NIYAM_ADMIN_IDENTIFIER=admin
@@ -345,6 +427,7 @@ NIYAM_DATA_DIR=$(shell_quote "$DATA_DIR")
 NIYAM_DB=$(shell_quote "$DB_PATH")
 NIYAM_ALLOWED_ORIGINS=$(shell_quote "$ALLOWED_ORIGINS")
 NIYAM_AGENT_TOKENS=$(shell_quote "{\"niyam-agent\":\"$AGENT_TOKEN\"}")
+NIYAM_ENABLE_SELF_SIGNUP=$(team_mode_env_value)
 NIYAM_SESSION_TTL_HOURS=12
 NIYAM_SESSION_CLEANUP_INTERVAL_MS=300000
 NIYAM_LOG_LEVEL=info
@@ -394,6 +477,8 @@ initialize_database() {
     info "Initializing database at $DB_PATH"
     (
         set -a
+        export NIYAM_PROFILE="$PROFILE"
+        export NIYAM_ENV_FILE="$ENV_FILE"
         # shellcheck disable=SC1090
         source "$ENV_FILE"
         set +a
@@ -413,6 +498,8 @@ start_server() {
     open_cli_wrapper_terminal || true
     (
         set -a
+        export NIYAM_PROFILE="$PROFILE"
+        export NIYAM_ENV_FILE="$ENV_FILE"
         # shellcheck disable=SC1090
         source "$ENV_FILE"
         set +a
@@ -489,6 +576,7 @@ print_summary() {
     printf 'Data dir: %s\n' "$DATA_DIR"
     printf 'Allowed roots: %s\n' "$EXEC_ALLOWED_ROOTS"
     printf 'Execution mode: %s\n' "$EXEC_DEFAULT_MODE"
+    printf 'Team mode: %s\n' "$( [[ "$TEAM_MODE" == "y" ]] && printf 'enabled' || printf 'disabled' )"
     printf '\n'
     print_dashboard_access
 
@@ -511,9 +599,9 @@ print_summary() {
 
 select_profile() {
     bold "Niyam one-click setup"
-    printf '1. Local development\n'
-    printf '2. Self-hosted prep\n'
-    printf '3. Start existing server env and stream logs\n'
+    printf '1. Local development (single-user or team mode)\n'
+    printf '2. Self-hosted prep (single-user or team mode)\n'
+    printf '3. Start existing server env and stream logs (single-user or team mode)\n'
     printf '\n'
 
     local answer
@@ -633,6 +721,9 @@ main() {
     fi
 
     if [[ "$START_ONLY" == "y" ]]; then
+        prompt_team_mode_setting "$TEAM_MODE"
+        apply_team_mode_to_env_file "$ENV_FILE"
+        sync_runtime_metadata_to_env_file "$ENV_FILE"
         start_server_with_logs "$ROOT_DIR/.local/logs"
         exit 0
     fi
@@ -650,9 +741,14 @@ main() {
         fi
     fi
 
+    prompt_team_mode_setting "$TEAM_MODE"
+
     if [[ "$REUSE_EXISTING_ENV" != "y" ]]; then
         write_env_file "$ENV_FILE"
+    else
+        apply_team_mode_to_env_file "$ENV_FILE"
     fi
+    sync_runtime_metadata_to_env_file "$ENV_FILE"
     mkdir -p "$DATA_DIR" "$BACKUP_DIR"
     if [[ ! -f "$DATA_DIR/backup-passphrase" ]]; then
         BACKUP_PASSPHRASE=$(random_secret)

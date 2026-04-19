@@ -96,7 +96,7 @@ async function handleSetup(parsed) {
         throw new Error('Setup could not determine the agent token. Pass --agent-token or add NIYAM_AGENT_TOKENS to the env file.');
     }
 
-    const { configPath } = ensureCliConfig(overrides);
+    const { configPath } = ensureCliConfig(overrides, { applyEnvOverrides: false });
     const rcPath = installShellSnippet(shell, cliPath);
 
     console.log(`Configured Niyam CLI for ${shell}`);
@@ -346,9 +346,21 @@ function buildClient(config) {
 
 async function waitForRemoteCommand(client, commandId, pollIntervalMs) {
     let lastStatus = null;
+    let lastApprovalCount = -1;
+    let lastApprovalRequired = 0;
 
     while (true) {
         const command = await client.getCommandStatus(commandId);
+        const progress = getApprovalProgress(command);
+        if (
+            progress.count > 0
+            && (progress.count !== lastApprovalCount || progress.required !== lastApprovalRequired)
+        ) {
+            announceApprovalProgress(commandId, progress.count, progress.required);
+        }
+        lastApprovalCount = progress.count;
+        lastApprovalRequired = progress.required;
+
         if (command.status !== lastStatus) {
             if (lastStatus === 'pending' && !['pending', 'approved', 'rejected', 'timeout'].includes(command.status)) {
                 announceCommandStatus(commandId, 'approved');
@@ -377,6 +389,23 @@ async function waitForRemoteCommand(client, commandId, pollIntervalMs) {
 
         await sleep(pollIntervalMs);
     }
+}
+
+function getApprovalProgress(command) {
+    const progress = command && command.approvalProgress ? command.approvalProgress : {};
+    return {
+        count: Number.isFinite(Number(progress.count))
+            ? Number(progress.count)
+            : Number(command && command.approval_count) || 0,
+        required: Number.isFinite(Number(progress.required))
+            ? Number(progress.required)
+            : Number(command && command.required_approvals) || 0
+    };
+}
+
+function announceApprovalProgress(commandId, count, required) {
+    const target = required > 0 ? required : '?';
+    console.error(`niyam-cli: approval ${count}/${target} recorded for ${commandId}`);
 }
 
 function announceCommandStatus(commandId, status) {

@@ -122,6 +122,35 @@ const MIGRATIONS = [
 
             ensureIndex(db, 'idx_local_users_enabled', 'CREATE INDEX idx_local_users_enabled ON local_users(enabled)');
         }
+    },
+    {
+        id: '005_signup_requests',
+        description: 'Add optional self-signup request workflow for team deployments',
+        up(db) {
+            if (!hasTable(db, 'signup_requests')) {
+                db.exec(`
+                    CREATE TABLE signup_requests (
+                        id TEXT PRIMARY KEY,
+                        username TEXT NOT NULL,
+                        display_name TEXT,
+                        password_hash TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        decision_reason TEXT,
+                        requested_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        reviewed_at TEXT,
+                        reviewed_by TEXT,
+                        user_id TEXT,
+                        metadata TEXT,
+                        FOREIGN KEY (user_id) REFERENCES local_users(id) ON DELETE SET NULL
+                    );
+                `);
+            }
+
+            ensureIndex(db, 'idx_signup_requests_status', 'CREATE INDEX idx_signup_requests_status ON signup_requests(status)');
+            ensureIndex(db, 'idx_signup_requests_username', 'CREATE INDEX idx_signup_requests_username ON signup_requests(username)');
+            ensureIndex(db, 'idx_signup_requests_requested_at', 'CREATE INDEX idx_signup_requests_requested_at ON signup_requests(requested_at)');
+        }
     }
 ];
 

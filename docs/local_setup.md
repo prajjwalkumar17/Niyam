@@ -5,6 +5,7 @@ Use this guide if you want the fastest path from clone to a working Niyam dashbo
 Related docs:
 
 - [Usage guide](./usage.md)
+- [CLI wrapper and team mode](./cli_wrapper.md)
 - [Feature guide](./features.md)
 - [API reference](./api_reference.md)
 - [Configuration reference](./configuration.md)
@@ -18,6 +19,8 @@ By the end of this guide you will be able to:
 
 - start Niyam locally
 - sign in to the dashboard
+- enable the CLI wrapper in a real shell
+- optionally turn on team mode
 - submit commands
 - create pending approvals that show up on the board
 - approve or reject them from the UI
@@ -162,9 +165,12 @@ The script will:
 
 - generate local secrets
 - write `.env.local`
+- optionally enable team mode
 - install dependencies
 - initialize the database
 - optionally start the server
+
+It can also open a second terminal with the CLI wrapper ready.
 
 If you already have `.env.local` and only want to start the app, run the same script and choose:
 
@@ -177,6 +183,8 @@ That mode:
 - starts Niyam immediately
 - streams logs to the terminal
 - writes a timestamped log file under `.local/logs/`
+
+If you want the full shell and team workflow after setup, continue with [CLI wrapper and team mode](./cli_wrapper.md).
 
 ## Manual Start
 

@@ -14,16 +14,36 @@ This document lists the main environment variables used by Niyam.
 - `PORT`
 - `NIYAM_DATA_DIR`
 - `NIYAM_DB`
+- `NIYAM_ENV_FILE`
+- `NIYAM_PROFILE`
 - `NIYAM_ALLOWED_ORIGINS`
 - `NIYAM_LOG_LEVEL`
+
+`NIYAM_ENV_FILE` and `NIYAM_PROFILE` are runtime metadata used by guided setup and the dashboard `Workspace` page. They are optional but recommended when you use `./oneclick-setup.sh`.
 
 ## Admin Auth
 
 - `NIYAM_ADMIN_USERNAME`
 - `NIYAM_ADMIN_PASSWORD`
 - `NIYAM_ADMIN_IDENTIFIER`
+- `NIYAM_ENABLE_SELF_SIGNUP`
 - `NIYAM_SESSION_TTL_HOURS`
 - `NIYAM_SESSION_CLEANUP_INTERVAL_MS`
+
+### Team Mode
+
+`NIYAM_ENABLE_SELF_SIGNUP=true` enables team mode signup requests.
+
+When enabled:
+
+- the login screen exposes `Request Access`
+- admins can approve or reject signup requests
+- local dashboard users can sign in with their own credentials
+
+When disabled:
+
+- admins can still create users directly from the `Users` page
+- there is no public self-signup path
 
 ## Agent Auth
 

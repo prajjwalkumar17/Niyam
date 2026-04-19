@@ -92,7 +92,7 @@ niyam-on() {
 niyam-off() {
   command "$NIYAM_CLI_BIN" disable --shell zsh || return $?
   zle -A .accept-line accept-line 2>/dev/null || true
-  unfunction __niyam_accept_line __niyam_zsh_begin_command __niyam_zsh_run_local __niyam_zsh_type 2>/dev/null || true
+  unfunction __niyam_accept_line __niyam_zsh_begin_command __niyam_zsh_finish_command __niyam_zsh_run_local __niyam_zsh_type 2>/dev/null || true
   source "$HOME/.zshrc"
 }
 ${BOOTSTRAP_END_MARKER}
@@ -140,6 +140,19 @@ __niyam_zsh_begin_command() {
   print
 }
 
+__niyam_zsh_finish_command() {
+  local fn
+  if typeset -f precmd >/dev/null 2>&1; then
+    precmd
+  fi
+  for fn in "\${precmd_functions[@]}"; do
+    [[ -n "$fn" && "$fn" != "precmd" && "\${+functions[$fn]}" -eq 1 ]] || continue
+    "$fn"
+  done
+  zle reset-prompt
+  zle -R
+}
+
 __niyam_accept_line() {
   emulate -L zsh
   local raw="$BUFFER"
@@ -163,7 +176,9 @@ __niyam_accept_line() {
     print -s -- "$raw"
     __niyam_zsh_begin_command
     eval "$raw"
-    return $?
+    local rc=$?
+    __niyam_zsh_finish_command
+    return $rc
   fi
 
   local first_type="unknown"
@@ -187,13 +202,18 @@ __niyam_accept_line() {
     85)
       local dispatch_id="\${local_result#dispatch_id=}"
       __niyam_zsh_run_local "$raw" "$dispatch_id"
-      return $?
+      rc=$?
+      __niyam_zsh_finish_command
+      return $rc
       ;;
     86)
       eval "$raw"
-      return $?
+      rc=$?
+      __niyam_zsh_finish_command
+      return $rc
       ;;
     *)
+      __niyam_zsh_finish_command
       return "$rc"
       ;;
   esac
@@ -221,7 +241,7 @@ niyam-on() {
 niyam-off() {
   command "$NIYAM_CLI_BIN" disable --shell bash || return $?
   bind '"\C-m":accept-line' 2>/dev/null || true
-  unset -f __niyam_bash_accept_line __niyam_bash_begin_command __niyam_bash_run_local __niyam_bash_type __niyam_bash_first_token 2>/dev/null || true
+  unset -f __niyam_bash_accept_line __niyam_bash_begin_command __niyam_bash_finish_command __niyam_bash_run_local __niyam_bash_type __niyam_bash_first_token 2>/dev/null || true
   source "$HOME/.bashrc"
 }
 ${BOOTSTRAP_END_MARKER}
@@ -277,6 +297,14 @@ __niyam_bash_begin_command() {
   printf '\n'
 }
 
+__niyam_bash_finish_command() {
+  READLINE_LINE=
+  READLINE_POINT=0
+  if [[ -n "\${PROMPT_COMMAND:-}" ]]; then
+    eval "\${PROMPT_COMMAND}"
+  fi
+}
+
 __niyam_bash_accept_line() {
   local raw="$READLINE_LINE"
   local trimmed="\${raw#"\${raw%%[![:space:]]*}"}"
@@ -303,6 +331,7 @@ __niyam_bash_accept_line() {
     builtin history -s "$raw"
     __niyam_bash_begin_command
     eval "$raw"
+    __niyam_bash_finish_command
     return
   fi
 
@@ -327,13 +356,16 @@ __niyam_bash_accept_line() {
     85)
       local dispatch_id="\${local_result#dispatch_id=}"
       __niyam_bash_run_local "$raw" "$dispatch_id"
+      __niyam_bash_finish_command
       return
       ;;
     86)
       eval "$raw"
+      __niyam_bash_finish_command
       return
       ;;
     *)
+      __niyam_bash_finish_command
       return "$rc"
       ;;
   esac

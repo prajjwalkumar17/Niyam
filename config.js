@@ -99,6 +99,9 @@ const ROOT_DIR = __dirname;
 const DATA_DIR = process.env.NIYAM_DATA_DIR
     ? path.resolve(process.env.NIYAM_DATA_DIR)
     : path.join(ROOT_DIR, 'data');
+const ENV_FILE = process.env.NIYAM_ENV_FILE
+    ? path.resolve(process.env.NIYAM_ENV_FILE)
+    : '';
 const DB_PATH = process.env.NIYAM_DB
     ? path.resolve(process.env.NIYAM_DB)
     : path.join(DATA_DIR, 'niyam.db');
@@ -113,13 +116,16 @@ const EXEC_ALLOWED_ROOTS = (() => {
 const config = {
     ROOT_DIR,
     DATA_DIR,
+    ENV_FILE,
     DB_PATH,
     PORT: parseIntEnv(process.env.NIYAM_PORT || process.env.PORT, 3000),
     NODE_ENV,
     IS_PRODUCTION,
+    PROFILE: String(process.env.NIYAM_PROFILE || (NODE_ENV === 'development' ? 'local' : 'selfhost')).toLowerCase(),
     ADMIN_USERNAME: process.env.NIYAM_ADMIN_USERNAME || 'admin',
     ADMIN_IDENTIFIER: process.env.NIYAM_ADMIN_IDENTIFIER || 'admin',
     ADMIN_PASSWORD: process.env.NIYAM_ADMIN_PASSWORD || (IS_PRODUCTION ? '' : 'admin'),
+    ENABLE_SELF_SIGNUP: parseBooleanEnv(process.env.NIYAM_ENABLE_SELF_SIGNUP, false),
     SESSION_COOKIE_NAME: 'niyam_session',
     SESSION_TTL_MS: parseFloatEnv(process.env.NIYAM_SESSION_TTL_HOURS, 12) * 60 * 60 * 1000,
     SESSION_CLEANUP_INTERVAL_MS: parseIntEnv(process.env.NIYAM_SESSION_CLEANUP_INTERVAL_MS, 5 * 60 * 1000),

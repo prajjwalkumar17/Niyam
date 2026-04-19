@@ -194,6 +194,16 @@ test('write endpoints reject invalid payloads', async () => {
     assert.equal(badRule.json.error, 'Validation failed');
 });
 
+test('unknown api routes return a 404 json response instead of hanging', async () => {
+    const response = await apiJson('/api/does-not-exist', {
+        method: 'GET',
+        cookie: adminCookie
+    });
+
+    assert.equal(response.status, 404);
+    assert.equal(response.json.error, 'API route not found');
+});
+
 test('built-in rule pack install is idempotent and influences simulation', async () => {
     const firstInstall = await apiJson('/api/rule-packs/gh/install', {
         method: 'POST',
@@ -300,7 +310,8 @@ test('versioned migrations are recorded in schema_migrations', async () => {
         '001_execution_mode_and_sessions',
         '002_redaction_and_pack_metadata',
         '003_cli_dispatches',
-        '004_local_users'
+        '004_local_users',
+        '005_signup_requests'
     ]);
 });
 
@@ -404,6 +415,151 @@ test('local users can be managed via admin APIs and disabled sessions are reject
         }
     });
     assert.equal(lastAdminDisable.status, 400);
+});
+
+test('self-signup requests can be approved, rejected, and self-managed in team mode', async () => {
+    const authConfig = await apiJson('/api/auth/config');
+    assert.equal(authConfig.status, 200);
+    assert.equal(authConfig.json.allowSelfSignup, true);
+
+    const signupRequest = await apiJson('/api/signup-requests', {
+        method: 'POST',
+        body: {
+            username: 'team-member',
+            displayName: 'Team Member',
+            password: 'team-pass-1'
+        }
+    });
+    assert.equal(signupRequest.status, 201);
+    assert.equal(signupRequest.json.status, 'pending');
+
+    const duplicateSignup = await apiJson('/api/signup-requests', {
+        method: 'POST',
+        body: {
+            username: 'team-member',
+            displayName: 'Duplicate Member',
+            password: 'team-pass-2'
+        }
+    });
+    assert.equal(duplicateSignup.status, 409);
+
+    const listPending = await apiJson('/api/signup-requests', {
+        method: 'GET',
+        cookie: adminCookie
+    });
+    assert.equal(listPending.status, 200);
+    assert.ok(listPending.json.requests.some(request => request.id === signupRequest.json.id));
+
+    const approveRequest = await apiJson(`/api/signup-requests/${signupRequest.json.id}/approve`, {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            approvalCapabilities: {
+                canApproveMedium: true,
+                canApproveHigh: false
+            }
+        }
+    });
+    assert.equal(approveRequest.status, 200);
+    assert.equal(approveRequest.json.request.status, 'approved');
+    assert.equal(approveRequest.json.user.username, 'team-member');
+    assert.equal(approveRequest.json.user.approvalCapabilities.canApproveMedium, true);
+
+    const approvedLogin = await loginAsLocalUser('team-member', 'team-pass-1');
+    assert.equal(approvedLogin.status, 200);
+    assert.equal(approvedLogin.json.principal.identifier, 'team-member');
+
+    const nonAdminRequestList = await apiJson('/api/signup-requests', {
+        method: 'GET',
+        cookie: approvedLogin.cookie
+    });
+    assert.equal(nonAdminRequestList.status, 403);
+
+    const passwordChange = await apiJson('/api/auth/change-password', {
+        method: 'POST',
+        cookie: approvedLogin.cookie,
+        body: {
+            currentPassword: 'team-pass-1',
+            newPassword: 'team-pass-2'
+        }
+    });
+    assert.equal(passwordChange.status, 200);
+    assert.equal(passwordChange.json.passwordChanged, true);
+
+    const oldPasswordLogin = await loginAsLocalUser('team-member', 'team-pass-1');
+    assert.equal(oldPasswordLogin.status, 401);
+    const newPasswordLogin = await loginAsLocalUser('team-member', 'team-pass-2');
+    assert.equal(newPasswordLogin.status, 200);
+
+    const rejectedRequest = await apiJson('/api/signup-requests', {
+        method: 'POST',
+        body: {
+            username: 'rejected-member',
+            displayName: 'Rejected Member',
+            password: 'reject-pass'
+        }
+    });
+    assert.equal(rejectedRequest.status, 201);
+
+    const reject = await apiJson(`/api/signup-requests/${rejectedRequest.json.id}/reject`, {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            rationale: 'Team is not ready for this account'
+        }
+    });
+    assert.equal(reject.status, 200);
+    assert.equal(reject.json.status, 'rejected');
+    assert.equal(reject.json.decisionReason, 'Team is not ready for this account');
+
+    const rejectedLogin = await loginAsLocalUser('rejected-member', 'reject-pass');
+    assert.equal(rejectedLogin.status, 401);
+});
+
+test('workspace endpoint exposes runtime details for admins and a safer view for non-admin users', async () => {
+    const adminWorkspace = await apiJson('/api/workspace', {
+        method: 'GET',
+        cookie: adminCookie
+    });
+    assert.equal(adminWorkspace.status, 200);
+    assert.equal(adminWorkspace.json.runtime.profile, 'local');
+    assert.equal(adminWorkspace.json.runtime.teamMode, true);
+    assert.equal(adminWorkspace.json.currentAccess.username, 'admin');
+    assert.equal(adminWorkspace.json.instance.envFile, path.join(tempRoot, 'test.env'));
+    assert.ok(Array.isArray(adminWorkspace.json.instance.allowedRoots));
+    assert.match(adminWorkspace.json.commands.startLater, /npm start/);
+    assert.match(adminWorkspace.json.bootstrapAccess.passwordSource, /NIYAM_ADMIN_PASSWORD/);
+
+    const createUser = await apiJson('/api/users', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            username: 'workspace-user',
+            displayName: 'Workspace User',
+            password: 'workspace-pass',
+            enabled: true,
+            roles: [],
+            approvalCapabilities: {
+                canApproveMedium: false,
+                canApproveHigh: false
+            }
+        }
+    });
+    assert.equal(createUser.status, 201);
+
+    const userLogin = await loginAsLocalUser('workspace-user', 'workspace-pass');
+    assert.equal(userLogin.status, 200);
+
+    const userWorkspace = await apiJson('/api/workspace', {
+        method: 'GET',
+        cookie: userLogin.cookie
+    });
+    assert.equal(userWorkspace.status, 200);
+    assert.equal(userWorkspace.json.currentAccess.username, 'workspace-user');
+    assert.equal(userWorkspace.json.instance, null);
+    assert.equal(userWorkspace.json.commands.startLater, null);
+    assert.equal(userWorkspace.json.bootstrapAccess.passwordSource, null);
+    assert.match(userWorkspace.json.currentAccess.passwordMessage, /local Niyam account/i);
 });
 
 test('high-risk commands can be approved by two distinct dashboard users', async () => {
@@ -517,9 +673,12 @@ test('niyam-cli install, status, and disable manage shell integration in a temp 
     assert.ok(fs.readFileSync(rcPath, 'utf8').includes('# >>> niyam-bootstrap >>>'));
     assert.ok(fs.readFileSync(rcPath, 'utf8').includes('# >>> niyam >>>'));
     assert.ok(renderedZsh.includes('__niyam_zsh_begin_command'));
+    assert.ok(renderedZsh.includes('__niyam_zsh_finish_command'));
+    assert.ok(renderedZsh.includes('precmd_functions'));
     assert.ok(renderedZsh.includes('niyam-on()'));
     assert.ok(renderedZsh.includes('niyam-off()'));
     assert.ok(renderedZsh.includes('zle reset-prompt\n  print'));
+    assert.ok(renderedZsh.includes('zle reset-prompt\n  zle -R'));
 
     const zshSyntax = await execFileAsync('zsh', ['-n', rcPath], {
         cwd: ROOT_DIR,
@@ -605,6 +764,35 @@ test('niyam-cli setup and uninstall provide one-command wrapper lifecycle', asyn
     assert.equal(rcAfterUninstall.includes('# >>> niyam >>>'), false);
     assert.equal(rcAfterUninstall.includes('# >>> niyam-bootstrap >>>'), false);
     assert.equal(fs.existsSync(configPath), false);
+});
+
+test('niyam-cli setup prefers env-file token values over stale shell exports', async () => {
+    const fakeHome = path.join(tempRoot, 'setup-prefer-file-home');
+    const fakeConfigHome = path.join(tempRoot, 'setup-prefer-file-config');
+    const envFile = path.join(tempRoot, 'setup-prefer-file.env');
+    await fsPromises.mkdir(fakeHome, { recursive: true });
+    await fsPromises.mkdir(fakeConfigHome, { recursive: true });
+    await fsPromises.writeFile(envFile, [
+        `NIYAM_CLI_BASE_URL='${baseUrl}'`,
+        'NIYAM_CLI_REQUESTER=niyam-agent',
+        `NIYAM_AGENT_TOKENS='{"niyam-agent":"dev-token"}'`
+    ].join('\n') + '\n', 'utf8');
+
+    const cliEnv = {
+        HOME: fakeHome,
+        XDG_CONFIG_HOME: fakeConfigHome,
+        SHELL: '/bin/zsh',
+        NIYAM_AGENT_TOKEN: 'stale-shell-token'
+    };
+
+    const setup = await runNodeScript('bin/niyam-cli.js', cliEnv, ['setup', '--env-file', envFile]);
+    assert.equal(setup.status, 0, setup.stderr);
+
+    const configPath = path.join(fakeConfigHome, 'niyam', 'config.json');
+    const savedConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    assert.equal(savedConfig.agentToken, 'dev-token');
+    assert.equal(savedConfig.requester, 'niyam-agent');
+    assert.equal(savedConfig.baseUrl, baseUrl);
 });
 
 test('niyam-cli env overrides stale config values', async () => {
@@ -738,6 +926,7 @@ test('niyam-cli announces approval lifecycle for pending remote commands', async
     assert.equal(dispatch.status, 0, dispatch.stderr);
     assert.ok(dispatch.stdout.includes('approval-test'));
     assert.match(dispatch.stderr, /pending approval/);
+    assert.match(dispatch.stderr, /approval 1\/1 recorded/);
     assert.match(dispatch.stderr, /approved/);
     assert.match(dispatch.stderr, /completed/);
 });
@@ -823,7 +1012,7 @@ test('backup and restore scripts preserve the database state', async () => {
     restoredDb.close();
 
     assert.ok(commandCount >= 1);
-    assert.equal(migrationCount, 4);
+    assert.equal(migrationCount, 5);
 });
 
 test('exec key rotation preserves delayed execution payloads', async () => {
@@ -928,10 +1117,13 @@ async function startServer() {
         cwd: ROOT_DIR,
         env: {
             ...process.env,
+            NIYAM_PROFILE: 'local',
+            NIYAM_ENV_FILE: path.join(tempRoot, 'test.env'),
             NIYAM_PORT: String(port),
             NIYAM_ADMIN_PASSWORD: 'admin',
             NIYAM_METRICS_TOKEN: 'metrics-secret',
             NIYAM_AGENT_TOKENS: JSON.stringify({ 'niyam-agent': 'dev-token' }),
+            NIYAM_ENABLE_SELF_SIGNUP: 'true',
             NIYAM_EXEC_ALLOWED_ROOTS: ROOT_DIR,
             NIYAM_EXEC_DEFAULT_MODE: 'DIRECT',
             NIYAM_EXEC_WRAPPER: '["/usr/bin/env"]',
