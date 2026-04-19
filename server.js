@@ -18,6 +18,7 @@ const { createRulesRouter } = require('./api/rules');
 const { createRulePacksRouter } = require('./api/rule-packs');
 const { createPolicyRouter } = require('./api/policy');
 const { createAuditRouter } = require('./api/audit');
+const { createCliRouter } = require('./api/cli');
 const { broadcastManager, broadcast } = require('./ws/broadcast');
 const ExecutionGuard = require('./executor/guard');
 const { createRequestLogger, logger, metrics } = require('./observability');
@@ -139,6 +140,7 @@ app.get('/api/health', (req, res) => {
 app.use('/api/commands', auth.requireAuth, createCommandsRouter(db, broadcast, { onApproved: queueExecution }));
 app.use('/api/approvals', auth.requireAuth, createApprovalsRouter(db, broadcast, { onApproved: queueExecution }));
 app.use('/api/policy', auth.requireAuth, createPolicyRouter(db));
+app.use('/api/cli', auth.requireAuth, createCliRouter(db, broadcast, auth, { onApproved: queueExecution }));
 app.use('/api/rules', auth.requireAdmin, createRulesRouter(db, broadcast));
 app.use('/api/rule-packs', auth.requireAdmin, createRulePacksRouter(db));
 app.use('/api/audit', auth.requireAdmin, createAuditRouter(db));

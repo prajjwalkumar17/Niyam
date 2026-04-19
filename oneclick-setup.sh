@@ -241,6 +241,47 @@ print_dashboard_access() {
     printf '\n'
 }
 
+default_cli_base_url() {
+    if [[ -n "${DOMAIN:-}" ]]; then
+        printf 'https://%s' "$DOMAIN"
+    else
+        printf 'http://127.0.0.1:%s' "$PORT"
+    fi
+}
+
+default_agent_token() {
+    if [[ -n "${AGENT_TOKEN:-}" ]]; then
+        printf '%s' "$AGENT_TOKEN"
+        return
+    fi
+
+    if [[ -z "${NIYAM_AGENT_TOKENS:-}" ]]; then
+        return
+    fi
+
+    node -e 'const raw = process.argv[1] || "{}"; const parsed = JSON.parse(raw); process.stdout.write(String(parsed["niyam-agent"] || Object.values(parsed)[0] || ""));' "$NIYAM_AGENT_TOKENS"
+}
+
+print_cli_wrapper_instructions() {
+    local base_url token
+    base_url=$(default_cli_base_url)
+    token=$(default_agent_token)
+
+    printf 'To enable the CLI wrapper in another terminal:\n'
+    if [[ -f "$ENV_FILE" ]]; then
+        printf '  set -a; source %s; set +a\n' "$ENV_FILE"
+    fi
+    printf '  export NIYAM_CLI_BASE_URL=%s\n' "$(shell_quote "$base_url")"
+    printf '  export NIYAM_CLI_REQUESTER=niyam-agent\n'
+    if [[ -n "$token" ]]; then
+        printf '  export NIYAM_AGENT_TOKEN=%s\n' "$(shell_quote "$token")"
+    else
+        printf '  export NIYAM_AGENT_TOKEN=<niyam-agent bearer token>\n'
+    fi
+    printf '  node %s/bin/niyam-cli.js install --shell zsh\n' "$ROOT_DIR"
+    printf '  source ~/.zshrc\n'
+}
+
 print_local_notes() {
     bold "Local setup notes"
     printf '  - Admin password: dashboard sign-in credential\n'
@@ -254,7 +295,7 @@ print_local_notes() {
 print_selfhost_notes() {
     bold "Self-hosted setup notes"
     printf '  - Admin password: dashboard operator login\n'
-    printf '  - Agent token: bearer token for the default "forger" agent\n'
+    printf '  - Agent token: bearer token for the default "niyam-agent" agent\n'
     printf '  - Execution data key: must stay stable for pending encrypted command payloads\n'
     printf '  - Metrics token: protects Prometheus-style metrics access\n'
     printf '  - Wrapper JSON array: isolation command used when rules force WRAPPER\n'
@@ -274,7 +315,7 @@ NIYAM_ADMIN_PASSWORD=$(shell_quote "$ADMIN_PASSWORD")
 NIYAM_DATA_DIR=$(shell_quote "$DATA_DIR")
 NIYAM_DB=$(shell_quote "$DB_PATH")
 NIYAM_ALLOWED_ORIGINS=$(shell_quote "$ALLOWED_ORIGINS")
-NIYAM_AGENT_TOKENS=$(shell_quote "{\"forger\":\"$AGENT_TOKEN\"}")
+NIYAM_AGENT_TOKENS=$(shell_quote "{\"niyam-agent\":\"$AGENT_TOKEN\"}")
 NIYAM_SESSION_TTL_HOURS=12
 NIYAM_SESSION_CLEANUP_INTERVAL_MS=300000
 NIYAM_LOG_LEVEL=info
@@ -301,6 +342,13 @@ NIYAM_REDACTION_REPLACEMENT=[REDACTED]
 NIYAM_REDACTION_EXTRA_KEYS=token,password,secret,api_key
 NIYAM_REDACTION_DISABLE_HEURISTICS=false
 EOF
+
+    if [[ "$PROFILE" == "local" ]]; then
+        cat >> "$target" <<EOF
+NIYAM_CLI_BASE_URL=$(shell_quote "http://127.0.0.1:$PORT")
+NIYAM_CLI_REQUESTER=niyam-agent
+EOF
+    fi
 }
 
 run_npm_install() {
@@ -359,6 +407,7 @@ start_server_with_logs() {
     info "Starting Niyam from $ENV_FILE"
     info "Streaming logs to terminal and $log_file"
     print_dashboard_access
+    print_cli_wrapper_instructions
     (
         set -a
         # shellcheck disable=SC1090
@@ -415,6 +464,8 @@ print_summary() {
     if [[ "$PROFILE" == "local" ]]; then
         printf 'To start later:\n'
         printf '  set -a; source %s; set +a; npm start\n' "$ENV_FILE"
+        printf '\n'
+        print_cli_wrapper_instructions
     else
         printf 'Deploy artifacts:\n'
         printf '  .deploy/niyam.env\n'
@@ -422,6 +473,8 @@ print_summary() {
         printf '  .deploy/niyam-backup.service\n'
         printf '  .deploy/niyam-backup.timer\n'
         printf '  .deploy/Caddyfile\n'
+        printf '\n'
+        print_cli_wrapper_instructions
     fi
 }
 
@@ -486,7 +539,7 @@ configure_local() {
     fi
     BACKUP_DIR=$(prompt_with_default "Backup directory" "$DATA_DIR/backups")
     ADMIN_PASSWORD=$(prompt_secret "Admin password (dashboard login)" "$generated_admin")
-    AGENT_TOKEN=$(prompt_secret "Agent token for \"forger\" (Bearer token)" "$generated_agent")
+    AGENT_TOKEN=$(prompt_secret "Agent token for \"niyam-agent\" (Bearer token)" "$generated_agent")
     EXEC_DATA_KEY=$(prompt_secret "Execution data key (encrypts stored raw command payloads)" "$generated_exec")
     METRICS_TOKEN=$(prompt_secret "Metrics token (/api/metrics access)" "$generated_metrics")
     ENV_FILE="$ROOT_DIR/.env.local"
@@ -519,7 +572,7 @@ configure_selfhost() {
     fi
     BACKUP_DIR=$(prompt_with_default "Backup directory" "/var/backups/niyam")
     ADMIN_PASSWORD=$(prompt_secret "Admin password (dashboard login)" "$generated_admin")
-    AGENT_TOKEN=$(prompt_secret "Agent token for \"forger\" (Bearer token)" "$generated_agent")
+    AGENT_TOKEN=$(prompt_secret "Agent token for \"niyam-agent\" (Bearer token)" "$generated_agent")
     EXEC_DATA_KEY=$(prompt_secret "Execution data key (encrypts stored raw command payloads)" "$generated_exec")
     METRICS_TOKEN=$(prompt_secret "Metrics token (/api/metrics access)" "$generated_metrics")
     ENV_FILE="$ROOT_DIR/.deploy/niyam.env"

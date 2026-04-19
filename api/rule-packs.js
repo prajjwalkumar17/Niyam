@@ -5,7 +5,7 @@ const {
     listPacks,
     previewPackUpgrade
 } = require('../policy/packs');
-const { logAudit } = require('./commands');
+const { logAudit } = require('../services/audit-log');
 const { validatePackActionBody, validationError } = require('./validation');
 
 function createRulePacksRouter(db) {

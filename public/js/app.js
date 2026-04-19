@@ -28,6 +28,7 @@ const ICONS = {
     dashboard: '<svg viewBox="0 0 24 24"><path d="M4 19h16M7 15v-4M12 15V7M17 15v-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
     pending: '<svg viewBox="0 0 24 24"><path d="M8 4h8M8 20h8M8 4c0 4 8 4 8 8s-8 4-8 8M16 4c0 4-8 4-8 8s8 4 8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     history: '<svg viewBox="0 0 24 24"><path d="M8 5h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8a3 3 0 1 1 0-6h10M8 5a3 3 0 1 0 0 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    dispatches: '<svg viewBox="0 0 24 24"><path d="M5 12h4l2-4 3 8 2-4h3M6 6h12M6 18h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     rules: '<svg viewBox="0 0 24 24"><path d="M9 4h6l1 2h3v14H5V6h3l1-2Zm0 6h6M9 12h6M9 16h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     audit: '<svg viewBox="0 0 24 24"><path d="M10.5 18a7.5 7.5 0 1 1 5.3-2.2L20 20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     activity: '<svg viewBox="0 0 24 24"><path d="M5 12h4l2-4 3 8 2-4h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -121,13 +122,13 @@ function enterAuthenticatedState(principal) {
 
         const pageFromHash = (window.location.hash || '').replace('#', '');
         const savedPage = localStorage.getItem('niyam.currentPage');
-        const initialPage = ['dashboard', 'pending', 'history', 'rules', 'audit'].includes(pageFromHash)
+        const initialPage = ['dashboard', 'pending', 'history', 'dispatches', 'rules', 'audit'].includes(pageFromHash)
             ? pageFromHash
-            : (['dashboard', 'pending', 'history', 'rules', 'audit'].includes(savedPage) ? savedPage : 'dashboard');
+            : (['dashboard', 'pending', 'history', 'dispatches', 'rules', 'audit'].includes(savedPage) ? savedPage : 'dashboard');
 
         window.addEventListener('hashchange', () => {
             const page = (window.location.hash || '').replace('#', '');
-            if (state.principal && ['dashboard', 'pending', 'history', 'rules', 'audit'].includes(page) && page !== state.currentPage) {
+            if (state.principal && ['dashboard', 'pending', 'history', 'dispatches', 'rules', 'audit'].includes(page) && page !== state.currentPage) {
                 navigateTo(page);
             }
         });
@@ -238,7 +239,7 @@ async function apiFetch(path, options = {}) {
 }
 
 function navigateTo(page) {
-    if (!['dashboard', 'pending', 'history', 'rules', 'audit'].includes(page)) {
+    if (!['dashboard', 'pending', 'history', 'dispatches', 'rules', 'audit'].includes(page)) {
         page = 'dashboard';
     }
 
@@ -260,6 +261,7 @@ function navigateTo(page) {
         dashboard: 'Dashboard',
         pending: 'Pending Approvals',
         history: 'Command History',
+        dispatches: 'Shell Dispatches',
         rules: 'Policy Rules',
         audit: 'Audit Log'
     };
@@ -273,6 +275,7 @@ function navigateTo(page) {
         case 'dashboard': renderDashboard(container); break;
         case 'pending': renderPending(container); break;
         case 'history': renderHistory(container); break;
+        case 'dispatches': renderDispatches(container); break;
         case 'rules': renderRules(container); break;
         case 'audit': renderAudit(container); break;
     }
@@ -350,6 +353,7 @@ function silentlyRefreshCurrentPage() {
         case 'dashboard': renderDashboard(container); break;
         case 'pending': renderPending(container); break;
         case 'history': renderHistory(container); break;
+        case 'dispatches': renderDispatches(container); break;
         case 'rules': renderRules(container); break;
         case 'audit': renderAudit(container); break;
     }

@@ -7,7 +7,7 @@ const http = require('http');
 class AgentClient {
     constructor(options = {}) {
         this.baseUrl = options.baseUrl || 'http://localhost:3000';
-        this.agentName = options.agentName || 'forger';
+        this.agentName = options.agentName || 'niyam-agent';
         this.apiToken = options.apiToken || process.env.NIYAM_AGENT_TOKEN || '';
         this.timeout = options.timeout || 10000;
     }
@@ -142,6 +142,41 @@ class AgentClient {
      */
     async getStats() {
         return this._request('GET', '/api/commands/stats/summary');
+    }
+
+    /**
+     * Create a shell dispatch record for interactive CLI governance.
+     * @param {Object} payload - CLI dispatch payload
+     * @returns {Promise<Object>} Dispatch response
+     */
+    async createCliDispatch(payload) {
+        return this._request('POST', '/api/cli/dispatches', payload);
+    }
+
+    /**
+     * Report completion for a local passthrough dispatch.
+     * @param {string} dispatchId - Dispatch ID
+     * @param {Object} payload - Completion payload
+     * @returns {Promise<Object>} Updated dispatch
+     */
+    async completeCliDispatch(dispatchId, payload) {
+        return this._request('POST', `/api/cli/dispatches/${dispatchId}/complete`, payload);
+    }
+
+    /**
+     * Returns the authenticated principal for the current token.
+     * @returns {Promise<Object>} Principal info
+     */
+    async getCurrentPrincipal() {
+        return this._request('GET', '/api/auth/me');
+    }
+
+    /**
+     * Returns the health payload for the current Niyam instance.
+     * @returns {Promise<Object>} Health info
+     */
+    async getHealth() {
+        return this._request('GET', '/api/health');
     }
 
     /**

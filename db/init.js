@@ -192,7 +192,7 @@ function seedApprovers(db) {
             id: uuidv4(),
             name: 'Default Agent',
             type: 'agent',
-            identifier: Object.keys(config.AGENT_TOKENS)[0] || 'forger',
+            identifier: Object.keys(config.AGENT_TOKENS)[0] || 'niyam-agent',
             can_approve_high: 1,
             can_approve_medium: 1
         },

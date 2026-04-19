@@ -3,7 +3,8 @@
  */
 
 const { v4: uuidv4 } = require('uuid');
-const { logAudit, shapeCommandRecord } = require('./commands');
+const { logAudit } = require('../services/audit-log');
+const { shapeCommandRecord } = require('../services/record-shaping');
 const { checkTwoPersonApproval, validateSeparateApprover } = require('../safety/two-person');
 const { validateRationale } = require('../safety/rationale');
 const { validateApprovalPayload, validationError } = require('./validation');

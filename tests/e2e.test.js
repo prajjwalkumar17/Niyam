@@ -4,10 +4,14 @@ const path = require('node:path');
 const os = require('node:os');
 const fsPromises = require('node:fs/promises');
 const fs = require('node:fs');
-const { spawn } = require('node:child_process');
+const { spawn, execFile } = require('node:child_process');
+const { promisify } = require('node:util');
 const Database = require('better-sqlite3');
+const CommandRunner = require('../executor/runner');
+const { renderShellInit } = require('../cli/shell-snippets');
 
 const ROOT_DIR = path.resolve(__dirname, '..');
+const execFileAsync = promisify(execFile);
 
 let serverProcess;
 let baseUrl;
@@ -57,6 +61,110 @@ test('policy simulation returns server-truth evaluation', async () => {
         metadataChanged: false,
         metadataPaths: []
     });
+});
+
+test('cli dispatches support remote exec, local passthrough, and blocked routing', async () => {
+    const blockRule = await apiJson('/api/rules', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            name: 'Block Dispatch Echo',
+            description: 'Force a blocked CLI dispatch route for testing',
+            rule_type: 'denylist',
+            pattern: 'echo blocked-dispatch',
+            priority: 700
+        }
+    });
+    assert.equal(blockRule.status, 201);
+
+    const remote = await apiJson('/api/cli/dispatches', {
+        method: 'POST',
+        token: 'dev-token',
+        body: {
+            rawCommand: 'ls public',
+            workingDir: ROOT_DIR,
+            shell: 'zsh',
+            sessionId: 'session-remote',
+            firstToken: 'ls',
+            firstTokenType: 'external',
+            hasShellSyntax: false,
+            interactiveHint: false,
+            metadata: { source: 'dispatch-test' }
+        }
+    });
+    assert.equal(remote.status, 201);
+    assert.equal(remote.json.route, 'REMOTE_EXEC');
+    assert.ok(remote.json.commandId);
+
+    const remoteCommand = await waitForCommand(remote.json.commandId);
+    assert.equal(remoteCommand.status, 'completed');
+
+    const local = await apiJson('/api/cli/dispatches', {
+        method: 'POST',
+        token: 'dev-token',
+        body: {
+            rawCommand: 'cd public',
+            workingDir: ROOT_DIR,
+            shell: 'zsh',
+            sessionId: 'session-local',
+            firstToken: 'cd',
+            firstTokenType: 'builtin',
+            hasShellSyntax: false,
+            interactiveHint: false,
+            metadata: { source: 'dispatch-test' }
+        }
+    });
+    assert.equal(local.status, 201);
+    assert.equal(local.json.route, 'LOCAL_PASSTHROUGH');
+    assert.equal(local.json.commandId, null);
+
+    const localComplete = await apiJson(`/api/cli/dispatches/${local.json.dispatchId}/complete`, {
+        method: 'POST',
+        token: 'dev-token',
+        body: {
+            exitCode: 0,
+            durationMs: 150
+        }
+    });
+    assert.equal(localComplete.status, 200);
+    assert.equal(localComplete.json.status, 'local_completed');
+
+    const blocked = await apiJson('/api/cli/dispatches', {
+        method: 'POST',
+        token: 'dev-token',
+        body: {
+            rawCommand: 'echo blocked-dispatch',
+            workingDir: ROOT_DIR,
+            shell: 'bash',
+            sessionId: 'session-blocked',
+            firstToken: 'echo',
+            firstTokenType: 'external',
+            hasShellSyntax: false,
+            interactiveHint: false,
+            metadata: { source: 'dispatch-test' }
+        }
+    });
+    assert.equal(blocked.status, 200);
+    assert.equal(blocked.json.route, 'BLOCKED');
+    assert.equal(blocked.json.commandId, null);
+
+    const dispatchList = await apiJson('/api/cli/dispatches?limit=20', {
+        method: 'GET',
+        cookie: adminCookie
+    });
+    assert.equal(dispatchList.status, 200);
+    assert.ok(dispatchList.json.dispatches.some(entry => entry.id === remote.json.dispatchId));
+    assert.ok(dispatchList.json.dispatches.some(entry => entry.id === local.json.dispatchId));
+    assert.ok(dispatchList.json.dispatches.some(entry => entry.id === blocked.json.dispatchId));
+
+    const audit = await apiJson('/api/audit?limit=100', {
+        method: 'GET',
+        cookie: adminCookie
+    });
+    assert.equal(audit.status, 200);
+    assert.ok(audit.json.entries.some(entry => entry.event_type === 'cli_dispatch_created'));
+    assert.ok(audit.json.entries.some(entry => entry.event_type === 'cli_dispatch_local_completed'));
+    assert.ok(audit.json.entries.some(entry => entry.event_type === 'cli_dispatch_blocked'));
 });
 
 test('write endpoints reject invalid payloads', async () => {
@@ -187,8 +295,130 @@ test('versioned migrations are recorded in schema_migrations', async () => {
 
     assert.deepEqual(migrations, [
         '001_execution_mode_and_sessions',
-        '002_redaction_and_pack_metadata'
+        '002_redaction_and_pack_metadata',
+        '003_cli_dispatches'
     ]);
+});
+
+test('niyam-cli install, status, and disable manage shell integration in a temp home', async () => {
+    const fakeHome = path.join(tempRoot, 'fake-home');
+    const fakeConfigHome = path.join(tempRoot, 'fake-config');
+    await fsPromises.mkdir(fakeHome, { recursive: true });
+    await fsPromises.mkdir(fakeConfigHome, { recursive: true });
+
+    const cliEnv = {
+        HOME: fakeHome,
+        XDG_CONFIG_HOME: fakeConfigHome,
+        NIYAM_AGENT_TOKEN: 'dev-token',
+        NIYAM_CLI_BASE_URL: baseUrl,
+        NIYAM_CLI_REQUESTER: 'niyam-agent'
+    };
+
+    const install = await runNodeScript('bin/niyam-cli.js', cliEnv, ['install', '--shell', 'zsh']);
+    assert.equal(install.status, 0, install.stderr);
+
+    const rcPath = path.join(fakeHome, '.zshrc');
+    const configPath = path.join(fakeConfigHome, 'niyam', 'config.json');
+    const renderedZsh = renderShellInit('zsh', path.join(ROOT_DIR, 'bin', 'niyam-cli.js'));
+    assert.ok(fs.existsSync(rcPath));
+    assert.ok(fs.existsSync(configPath));
+    assert.ok(fs.readFileSync(rcPath, 'utf8').includes('# >>> niyam >>>'));
+    assert.ok(renderedZsh.includes('__niyam_zsh_begin_command'));
+    assert.ok(renderedZsh.includes('zle reset-prompt\n  print'));
+
+    const zshSyntax = await execFileAsync('zsh', ['-n', rcPath], {
+        cwd: ROOT_DIR,
+        env: { ...process.env, HOME: fakeHome }
+    });
+    assert.equal(zshSyntax.stderr, '');
+
+    const dispatch = await runNodeScript('bin/niyam-cli.js', cliEnv, [
+        'dispatch',
+        '--json',
+        '--command',
+        'ls public',
+        '--shell',
+        'zsh',
+        '--session-id',
+        'cli-json-test',
+        '--first-token',
+        'ls',
+        '--first-token-type',
+        'external',
+        '--working-dir',
+        ROOT_DIR
+    ]);
+    assert.equal(dispatch.status, 0, dispatch.stderr);
+    const dispatchJson = JSON.parse(dispatch.stdout);
+    assert.equal(dispatchJson.route, 'REMOTE_EXEC');
+    assert.ok(dispatchJson.commandId);
+
+    const status = await runNodeScript('bin/niyam-cli.js', cliEnv, ['status']);
+    assert.equal(status.status, 0, status.stderr);
+    assert.ok(status.stdout.includes('Agent token: configured'));
+    assert.ok(status.stdout.includes('Requester: niyam-agent'));
+    assert.ok(status.stdout.includes('zsh: installed'));
+
+    const disable = await runNodeScript('bin/niyam-cli.js', cliEnv, ['disable', '--shell', 'zsh']);
+    assert.equal(disable.status, 0, disable.stderr);
+    assert.equal(fs.readFileSync(rcPath, 'utf8').includes('# >>> niyam >>>'), false);
+});
+
+test('niyam-cli env overrides stale config values', async () => {
+    const fakeHome = path.join(tempRoot, 'override-home');
+    const fakeConfigHome = path.join(tempRoot, 'override-config');
+    await fsPromises.mkdir(fakeHome, { recursive: true });
+    await fsPromises.mkdir(path.join(fakeConfigHome, 'niyam'), { recursive: true });
+
+    const configPath = path.join(fakeConfigHome, 'niyam', 'config.json');
+    await fsPromises.writeFile(configPath, `${JSON.stringify({
+        baseUrl: 'http://127.0.0.1:9999',
+        agentToken: '',
+        requester: 'prajjwal.kumar'
+    }, null, 2)}\n`, 'utf8');
+
+    const cliEnv = {
+        HOME: fakeHome,
+        XDG_CONFIG_HOME: fakeConfigHome,
+        NIYAM_AGENT_TOKEN: 'dev-token',
+        NIYAM_CLI_BASE_URL: baseUrl,
+        NIYAM_CLI_REQUESTER: 'niyam-agent'
+    };
+
+    const status = await runNodeScript('bin/niyam-cli.js', cliEnv, ['status']);
+    assert.equal(status.status, 0, status.stderr);
+    assert.ok(status.stdout.includes(`Base URL: ${baseUrl}`));
+    assert.ok(status.stdout.includes('Requester: niyam-agent'));
+    assert.ok(status.stdout.includes('Agent token: configured'));
+
+    const dispatch = await runNodeScript('bin/niyam-cli.js', cliEnv, [
+        'dispatch',
+        '--json',
+        '--command',
+        'ls public',
+        '--shell',
+        'zsh',
+        '--session-id',
+        'cli-env-override',
+        '--first-token',
+        'ls',
+        '--first-token-type',
+        'external',
+        '--working-dir',
+        ROOT_DIR
+    ]);
+    assert.equal(dispatch.status, 0, dispatch.stderr);
+    const dispatchJson = JSON.parse(dispatch.stdout);
+    assert.equal(dispatchJson.route, 'REMOTE_EXEC');
+});
+
+test('allowed-root checks accept equivalent path casing when the filesystem resolves it', () => {
+    const alternateCaseRoot = ROOT_DIR.replace('/Projects/Niyam', '/Projects/niyam');
+    if (!fs.existsSync(alternateCaseRoot)) {
+        return;
+    }
+
+    assert.equal(CommandRunner.isPathWithinRoots(ROOT_DIR, [alternateCaseRoot]), true);
 });
 
 test('backup and restore scripts preserve the database state', async () => {
@@ -224,7 +454,7 @@ test('backup and restore scripts preserve the database state', async () => {
     restoredDb.close();
 
     assert.ok(commandCount >= 1);
-    assert.equal(migrationCount, 2);
+    assert.equal(migrationCount, 3);
 });
 
 test('exec key rotation preserves delayed execution payloads', async () => {
@@ -332,7 +562,7 @@ async function startServer() {
             NIYAM_PORT: String(port),
             NIYAM_ADMIN_PASSWORD: 'admin',
             NIYAM_METRICS_TOKEN: 'metrics-secret',
-            NIYAM_AGENT_TOKENS: JSON.stringify({ forger: 'dev-token' }),
+            NIYAM_AGENT_TOKENS: JSON.stringify({ 'niyam-agent': 'dev-token' }),
             NIYAM_EXEC_ALLOWED_ROOTS: ROOT_DIR,
             NIYAM_EXEC_DEFAULT_MODE: 'DIRECT',
             NIYAM_EXEC_WRAPPER: '["/usr/bin/env"]',

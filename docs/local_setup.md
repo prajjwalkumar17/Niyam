@@ -202,7 +202,7 @@ For local development, this is a good baseline:
 
 ```bash
 export NIYAM_ADMIN_PASSWORD=change-me
-export NIYAM_AGENT_TOKENS='{"forger":"dev-token"}'
+export NIYAM_AGENT_TOKENS='{"niyam-agent":"dev-token"}'
 export NIYAM_METRICS_TOKEN=metrics-secret
 export NIYAM_EXEC_ALLOWED_ROOTS="$PWD"
 export NIYAM_EXEC_DEFAULT_MODE=DIRECT
@@ -214,7 +214,7 @@ PowerShell equivalent:
 
 ```powershell
 $env:NIYAM_ADMIN_PASSWORD = "change-me"
-$env:NIYAM_AGENT_TOKENS = '{"forger":"dev-token"}'
+$env:NIYAM_AGENT_TOKENS = '{"niyam-agent":"dev-token"}'
 $env:NIYAM_METRICS_TOKEN = "metrics-secret"
 $env:NIYAM_EXEC_ALLOWED_ROOTS = (Get-Location).Path
 $env:NIYAM_EXEC_DEFAULT_MODE = "DIRECT"

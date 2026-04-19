@@ -45,6 +45,11 @@ function renderAudit(container) {
                     <option value="command_failed">Command Failed</option>
                     <option value="command_blocked">Command Blocked</option>
                     <option value="command_timeout">Command Timeout</option>
+                    <option value="cli_dispatch_created">CLI Dispatch Created</option>
+                    <option value="cli_dispatch_blocked">CLI Dispatch Blocked</option>
+                    <option value="cli_dispatch_linked_command">CLI Dispatch Linked</option>
+                    <option value="cli_dispatch_local_completed">CLI Local Completed</option>
+                    <option value="cli_dispatch_local_failed">CLI Local Failed</option>
                     <option value="approval_granted">Approval Granted</option>
                     <option value="rule_created">Rule Created</option>
                     <option value="rule_updated">Rule Updated</option>
@@ -213,6 +218,11 @@ async function loadAuditLog() {
             command_failed: { icon: renderEventChip('ER', 'error'), class: 'event-rejected' },
             command_blocked: { icon: renderEventChip('BL', 'warning'), class: 'event-command_blocked' },
             command_timeout: { icon: renderEventChip('TM', 'warning'), class: '' },
+            cli_dispatch_created: { icon: renderEventChip('CD'), class: '' },
+            cli_dispatch_blocked: { icon: renderEventChip('CB', 'warning'), class: 'event-command_blocked' },
+            cli_dispatch_linked_command: { icon: renderEventChip('LK', 'approved'), class: 'event-approved' },
+            cli_dispatch_local_completed: { icon: renderEventChip('LC', 'approved'), class: 'event-approved' },
+            cli_dispatch_local_failed: { icon: renderEventChip('LF', 'error'), class: 'event-rejected' },
             approval_granted: { icon: renderEventChip('AP', 'approved'), class: 'event-approved' },
             rule_created: { icon: renderEventChip('RC'), class: '' },
             rule_updated: { icon: renderEventChip('RU'), class: '' },
@@ -288,6 +298,26 @@ function formatAuditDetails(entry) {
         html += `<div style="color:var(--accent-red)"><strong>Error:</strong> ${escapeHtml(details.error)}</div>`;
     }
     
+    if (details.route) {
+        html += `<div><strong>Route:</strong> ${escapeHtml(details.route)}</div>`;
+    }
+
+    if (details.shell) {
+        html += `<div><strong>Shell:</strong> ${escapeHtml(details.shell)}</div>`;
+    }
+
+    if (details.commandId) {
+        html += `<div><strong>Linked Command:</strong> <code style="color:var(--accent-cyan)">${escapeHtml(details.commandId)}</code></div>`;
+    }
+
+    if (details.durationMs !== undefined) {
+        html += `<div><strong>Duration:</strong> ${details.durationMs}ms</div>`;
+    }
+
+    if (details.exitCode !== undefined) {
+        html += `<div><strong>Exit Code:</strong> ${details.exitCode}</div>`;
+    }
+
     if (details.exit_code !== undefined) {
         html += `<div><strong>Exit Code:</strong> ${details.exit_code}</div>`;
     }

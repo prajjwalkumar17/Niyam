@@ -76,7 +76,7 @@ function parseAgentTokens() {
     }
 
     if (process.env.NIYAM_AGENT_TOKEN) {
-        const identifier = process.env.NIYAM_AGENT_IDENTIFIER || 'forger';
+        const identifier = process.env.NIYAM_AGENT_IDENTIFIER || 'niyam-agent';
         return { [identifier]: process.env.NIYAM_AGENT_TOKEN };
     }
 

@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "CLI Command Governance System - Policy engine with approval workflows",
   "main": "server.js",
+  "bin": {
+    "niyam-cli": "./bin/niyam-cli.js"
+  },
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",

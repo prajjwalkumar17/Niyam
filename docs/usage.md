@@ -219,7 +219,7 @@ const AgentClient = require('./agent/client');
 
 const client = new AgentClient({
   baseUrl: 'http://localhost:3000',
-  agentName: 'forger',
+  agentName: 'niyam-agent',
   apiToken: 'dev-token'
 });
 

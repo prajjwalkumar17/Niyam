@@ -36,7 +36,7 @@ This document lists the main environment variables used by Niyam.
 Example:
 
 ```bash
-export NIYAM_AGENT_TOKENS='{"forger":"dev-token","reviewer":"another-token"}'
+export NIYAM_AGENT_TOKENS='{"niyam-agent":"dev-token","reviewer":"another-token"}'
 ```
 
 ## Execution Controls
@@ -131,7 +131,7 @@ This means:
 ```bash
 export NODE_ENV=production
 export NIYAM_ADMIN_PASSWORD='replace-me'
-export NIYAM_AGENT_TOKENS='{"forger":"replace-me"}'
+export NIYAM_AGENT_TOKENS='{"niyam-agent":"replace-me"}'
 export NIYAM_DATA_DIR=/var/lib/niyam
 export NIYAM_DB=/var/lib/niyam/niyam.db
 export NIYAM_ALLOWED_ORIGINS='https://niyam.example.com'

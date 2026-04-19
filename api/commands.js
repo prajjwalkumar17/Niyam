@@ -2,22 +2,14 @@
  * Command API - Submission, status, and history endpoints
  */
 
-const { v4: uuidv4 } = require('uuid');
-const PolicyEngine = require('../policy/engine');
-const { calculateTimeout } = require('../policy/risk-classifier');
-const { config } = require('../config');
-const { encryptJson } = require('../security/crypto');
-const {
-    buildRedactionSummary,
-    redactAuditDetails,
-    redactCommandInput
-} = require('../security/redaction');
+const { redactCommandInput } = require('../security/redaction');
+const { logAudit } = require('../services/audit-log');
+const { persistCommandSubmission, prepareCommandSubmission } = require('../services/command-submissions');
+const { shapeCommandRecord } = require('../services/record-shaping');
 const { validateCommandPayload, validationError } = require('./validation');
-const { logger, maybeAlertForAuditEvent, metrics } = require('../observability');
 
 function createCommandsRouter(db, broadcast, hooks = {}) {
     const router = require('express').Router();
-    const policyEngine = new PolicyEngine(db);
 
     router.post('/', (req, res) => {
         const validation = validateCommandPayload(req.body);
@@ -25,24 +17,24 @@ function createCommandsRouter(db, broadcast, hooks = {}) {
             return validationError(res, validation.errors);
         }
         const { command, args, metadata, timeoutHours, workingDir } = validation.value;
-
-        const rawArgs = args;
-        const rawMetadata = metadata;
         const requester = req.principal.identifier;
         const requesterType = req.principal.type;
-        const now = new Date().toISOString();
-
-        const evaluation = policyEngine.evaluate(command, rawArgs);
-        const redactedInput = redactCommandInput({
+        const prepared = prepareCommandSubmission(db, {
             command,
-            args: rawArgs,
-            metadata: rawMetadata
+            args,
+            metadata
         });
+        const { evaluation, redactedInput } = prepared;
 
         if (!evaluation.allowed) {
+            const blockedInput = redactCommandInput({
+                command,
+                args,
+                metadata
+            });
             logAudit(db, 'command_blocked', 'command', null, requester, {
-                command: redactedInput.command,
-                args: redactedInput.args,
+                command: blockedInput.command,
+                args: blockedInput.args,
                 reason: evaluation.reason
             });
 
@@ -53,80 +45,20 @@ function createCommandsRouter(db, broadcast, hooks = {}) {
             });
         }
 
-        const commandId = uuidv4();
-        const timeoutAt = calculateTimeout(evaluation.riskLevel, timeoutHours);
-        const status = evaluation.autoApproved ? 'approved' : 'pending';
-        const redactionSummary = buildRedactionSummary(redactedInput.summary);
-
-        db.prepare(`
-            INSERT INTO commands (
-                id, command, args, requester, requester_type,
-                risk_level, status, created_at, updated_at,
-                timeout_at, approval_count, required_approvals,
-                rationale_required, metadata, working_dir, execution_mode,
-                redaction_summary, redacted, exec_command, exec_args, exec_metadata
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(
-            commandId,
-            redactedInput.command,
-            JSON.stringify(redactedInput.args),
+        const commandData = persistCommandSubmission({
+            db,
+            broadcast,
+            onApproved: hooks.onApproved,
             requester,
-            requesterType || 'agent',
-            evaluation.riskLevel,
-            status,
-            now,
-            now,
-            timeoutAt,
-            0,
-            evaluation.threshold.requiredApprovals,
-            evaluation.threshold.rationaleRequired ? 1 : 0,
-            JSON.stringify(redactedInput.metadata || {}),
-            workingDir || null,
-            evaluation.executionMode,
-            JSON.stringify(redactionSummary),
-            redactedInput.redacted ? 1 : 0,
-            encryptJson(command, config.EXEC_DATA_KEY),
-            encryptJson(rawArgs, config.EXEC_DATA_KEY),
-            encryptJson(rawMetadata, config.EXEC_DATA_KEY)
-        );
-
-        logAudit(db, 'command_submitted', 'command', commandId, requester, {
-            command: redactedInput.command,
-            args: redactedInput.args,
-            riskLevel: evaluation.riskLevel,
-            risk_level: evaluation.riskLevel,
-            executionMode: evaluation.executionMode,
-            autoApproved: evaluation.autoApproved,
-            matchedRules: evaluation.matchedRules.map(rule => rule.name)
+            requesterType,
+            command,
+            args,
+            metadata,
+            timeoutHours,
+            workingDir,
+            evaluation,
+            redactedInput
         });
-
-        const commandData = {
-            id: commandId,
-            command: redactedInput.command,
-            args: redactedInput.args,
-            requester,
-            riskLevel: evaluation.riskLevel,
-            executionMode: evaluation.executionMode,
-            status,
-            autoApproved: evaluation.autoApproved,
-            timeoutAt,
-            threshold: evaluation.threshold,
-            redacted: redactedInput.redacted,
-            redactionSummary
-        };
-
-        if (broadcast) {
-            broadcast('command_submitted', commandData);
-        }
-
-        if (evaluation.autoApproved) {
-            if (broadcast) {
-                broadcast('command_auto_approved', { id: commandId, command: redactedInput.command });
-            }
-            if (hooks.onApproved) {
-                hooks.onApproved(commandId);
-            }
-        }
 
         res.status(201).json(commandData);
     });
@@ -196,7 +128,7 @@ function createCommandsRouter(db, broadcast, hooks = {}) {
         });
     });
 
-    router.get('/stats/summary', (req, res) => {
+    router.get('/stats/summary', (_req, res) => {
         const stats = {
             total: db.prepare('SELECT COUNT(*) as count FROM commands').get().count,
             pending: db.prepare("SELECT COUNT(*) as count FROM commands WHERE status = 'pending'").get().count,
@@ -217,64 +149,6 @@ function createCommandsRouter(db, broadcast, hooks = {}) {
     return router;
 }
 
-function logAudit(db, eventType, entityType, entityId, actor, details) {
-    const auditRedaction = redactAuditDetails(details || {});
-
-    db.prepare(`
-        INSERT INTO audit_log (id, event_type, entity_type, entity_id, actor, details, redaction_summary, redacted, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-        uuidv4(),
-        eventType,
-        entityType,
-        entityId,
-        actor,
-        JSON.stringify(auditRedaction.details),
-        JSON.stringify(auditRedaction.summary),
-        auditRedaction.redacted ? 1 : 0,
-        new Date().toISOString()
-    );
-
-    logger.info('audit_event', {
-        eventType,
-        entityType,
-        entityId,
-        actor,
-        details: auditRedaction.details
-    });
-    metrics.incCounter('niyam_audit_events_total', {
-        event_type: eventType,
-        entity_type: entityType || 'unknown'
-    }, 1, 'Audit events');
-    maybeAlertForAuditEvent(eventType, actor, auditRedaction.details || {});
-}
-
-function shapeCommandRecord(record) {
-    const shaped = { ...record };
-    shaped.args = parseJson(shaped.args, []);
-    shaped.metadata = parseJson(shaped.metadata, {});
-    shaped.redaction_summary = parseJson(shaped.redaction_summary, {});
-    shaped.redacted = Boolean(shaped.redacted);
-    delete shaped.exec_command;
-    delete shaped.exec_args;
-    delete shaped.exec_metadata;
-    return shaped;
-}
-
-function parseJson(value, fallback) {
-    if (value === null || value === undefined || value === '') {
-        return fallback;
-    }
-
-    try {
-        return JSON.parse(value);
-    } catch (error) {
-        return fallback;
-    }
-}
-
 module.exports = {
-    createCommandsRouter,
-    logAudit,
-    shapeCommandRecord
+    createCommandsRouter
 };
