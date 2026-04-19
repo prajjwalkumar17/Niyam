@@ -121,6 +121,36 @@ __niyam_zsh_type() {
   esac
 }
 
+__niyam_zsh_first_token() {
+  local raw="$1"
+  local trimmed="\${raw#"\${raw%%[![:space:]]*}"}"
+  local -a parts
+  parts=(\${(z)trimmed})
+  print -- "\${parts[1]}"
+}
+
+__niyam_zsh_expand_aliases() {
+  emulate -L zsh
+  local expanded="$1"
+  local token alias_value rest
+  local depth=0
+  local -A seen
+
+  while (( depth < 8 )); do
+    token="$(__niyam_zsh_first_token "$expanded")"
+    [[ -n "$token" ]] || break
+    alias_value="\${aliases[$token]}"
+    [[ -n "$alias_value" ]] || break
+    [[ -n "\${seen[$token]:-}" ]] && break
+    seen[$token]=1
+    rest="\${expanded#"$token"}"
+    expanded="\${alias_value}\${rest}"
+    depth=$((depth + 1))
+  done
+
+  print -r -- "$expanded"
+}
+
 __niyam_zsh_run_local() {
   local raw="$1"
   local dispatch_id="$2"
@@ -171,6 +201,8 @@ __niyam_accept_line() {
   local -a parts
   parts=(\${(z)trimmed})
   local first_token="\${parts[1]}"
+  local dispatch_command="$raw"
+  local dispatch_first_token="$first_token"
 
   if [[ "\${trimmed[1]}" == "#" || "$first_token" == "niyam-cli" || "$first_token" == "$NIYAM_CLI_BIN" ]]; then
     print -s -- "$raw"
@@ -184,13 +216,20 @@ __niyam_accept_line() {
   local first_type="unknown"
   if [[ -n "$first_token" ]]; then
     first_type="$(__niyam_zsh_type "$first_token")"
+    if [[ "$first_type" == "alias" ]]; then
+      dispatch_command="$(__niyam_zsh_expand_aliases "$trimmed")"
+      dispatch_first_token="$(__niyam_zsh_first_token "$dispatch_command")"
+      if [[ -n "$dispatch_first_token" ]]; then
+        first_type="$(__niyam_zsh_type "$dispatch_first_token")"
+      fi
+    fi
   fi
 
   local local_file="\${TMPDIR:-/tmp}/niyam-dispatch.$$.$RANDOM"
   : > "$local_file"
   print -s -- "$raw"
   __niyam_zsh_begin_command
-  NIYAM_INTERCEPT_ACTIVE=1 command "$NIYAM_CLI_BIN" dispatch --command "$raw" --shell zsh --session-id "$NIYAM_INTERCEPT_SESSION_ID" --first-token "$first_token" --first-token-type "$first_type" --working-dir "$PWD" --local-output-file "$local_file"
+  NIYAM_INTERCEPT_ACTIVE=1 command "$NIYAM_CLI_BIN" dispatch --command "$dispatch_command" --shell zsh --session-id "$NIYAM_INTERCEPT_SESSION_ID" --first-token "$dispatch_first_token" --first-token-type "$first_type" --working-dir "$PWD" --local-output-file "$local_file"
   local rc=$?
   local local_result=''
   if [[ -f "$local_file" ]]; then
@@ -278,6 +317,38 @@ __niyam_bash_type() {
   esac
 }
 
+__niyam_bash_lookup_alias() {
+  local token="$1"
+  local line
+  line="$(alias "$token" 2>/dev/null || true)"
+  [[ "$line" == alias\ *=* ]] || return 1
+  line="\${line#alias }"
+  line="\${line#*=}"
+  line="\${line#\'}"
+  line="\${line%\'}"
+  printf '%s' "$line"
+}
+
+__niyam_bash_expand_aliases() {
+  local expanded="$1"
+  local token alias_value rest depth=0
+  local seen=" "
+
+  while [[ $depth -lt 8 ]]; do
+    token="$(__niyam_bash_first_token "$expanded")"
+    [[ -n "$token" ]] || break
+    alias_value="$(__niyam_bash_lookup_alias "$token")"
+    [[ -n "$alias_value" ]] || break
+    [[ "$seen" == *" $token "* ]] && break
+    seen="$seen$token "
+    rest="\${expanded#"$token"}"
+    expanded="\${alias_value}\${rest}"
+    depth=$((depth + 1))
+  done
+
+  printf '%s' "$expanded"
+}
+
 __niyam_bash_run_local() {
   local raw="$1"
   local dispatch_id="$2"
@@ -326,6 +397,8 @@ __niyam_bash_accept_line() {
 
   local first_token
   first_token="$(__niyam_bash_first_token "$trimmed")"
+  local dispatch_command="$raw"
+  local dispatch_first_token="$first_token"
 
   if [[ "$trimmed" == \#* || "$first_token" == "niyam-cli" || "$first_token" == "$NIYAM_CLI_BIN" ]]; then
     builtin history -s "$raw"
@@ -338,13 +411,20 @@ __niyam_bash_accept_line() {
   local first_type="unknown"
   if [[ -n "$first_token" ]]; then
     first_type="$(__niyam_bash_type "$first_token")"
+    if [[ "$first_type" == "alias" ]]; then
+      dispatch_command="$(__niyam_bash_expand_aliases "$trimmed")"
+      dispatch_first_token="$(__niyam_bash_first_token "$dispatch_command")"
+      if [[ -n "$dispatch_first_token" ]]; then
+        first_type="$(__niyam_bash_type "$dispatch_first_token")"
+      fi
+    fi
   fi
 
   local local_file="\${TMPDIR:-/tmp}/niyam-dispatch.$$.$RANDOM"
   : > "$local_file"
   builtin history -s "$raw"
   __niyam_bash_begin_command
-  NIYAM_INTERCEPT_ACTIVE=1 command "$NIYAM_CLI_BIN" dispatch --command "$raw" --shell bash --session-id "$NIYAM_INTERCEPT_SESSION_ID" --first-token "$first_token" --first-token-type "$first_type" --working-dir "$PWD" --local-output-file "$local_file"
+  NIYAM_INTERCEPT_ACTIVE=1 command "$NIYAM_CLI_BIN" dispatch --command "$dispatch_command" --shell bash --session-id "$NIYAM_INTERCEPT_SESSION_ID" --first-token "$dispatch_first_token" --first-token-type "$first_type" --working-dir "$PWD" --local-output-file "$local_file"
   local rc=$?
   local local_result=''
   if [[ -f "$local_file" ]]; then
