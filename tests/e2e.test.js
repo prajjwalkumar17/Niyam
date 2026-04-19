@@ -412,6 +412,62 @@ test('niyam-cli env overrides stale config values', async () => {
     assert.equal(dispatchJson.route, 'REMOTE_EXEC');
 });
 
+test('niyam-cli announces approval lifecycle for pending remote commands', async () => {
+    const cliEnv = {
+        NIYAM_AGENT_TOKEN: 'dev-token',
+        NIYAM_CLI_BASE_URL: baseUrl,
+        NIYAM_CLI_REQUESTER: 'niyam-agent',
+        NIYAM_CLI_POLL_INTERVAL_MS: '100'
+    };
+
+    const dispatchPromise = runNodeScript('bin/niyam-cli.js', cliEnv, [
+        'dispatch',
+        '--command',
+        'echo approval-test',
+        '--shell',
+        'zsh',
+        '--session-id',
+        'cli-approval-lifecycle',
+        '--first-token',
+        'echo',
+        '--first-token-type',
+        'external',
+        '--working-dir',
+        ROOT_DIR
+    ]);
+
+    let pendingCommand;
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+        const pending = await apiJson('/api/approvals', {
+            method: 'GET',
+            cookie: adminCookie
+        });
+        pendingCommand = pending.json.find(command => command.command === 'echo' && command.args[0] === 'approval-test');
+        if (pendingCommand) {
+            break;
+        }
+        await sleep(100);
+    }
+
+    assert.ok(pendingCommand, 'expected pending approval-test command');
+
+    const approve = await apiJson(`/api/approvals/${pendingCommand.id}/approve`, {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            rationale: 'Approve CLI lifecycle test'
+        }
+    });
+    assert.equal(approve.status, 200);
+
+    const dispatch = await dispatchPromise;
+    assert.equal(dispatch.status, 0, dispatch.stderr);
+    assert.ok(dispatch.stdout.includes('approval-test'));
+    assert.match(dispatch.stderr, /pending approval/);
+    assert.match(dispatch.stderr, /approved/);
+    assert.match(dispatch.stderr, /completed/);
+});
+
 test('allowed-root checks accept equivalent path casing when the filesystem resolves it', () => {
     const alternateCaseRoot = ROOT_DIR.replace('/Projects/Niyam', '/Projects/niyam');
     if (!fs.existsSync(alternateCaseRoot)) {
