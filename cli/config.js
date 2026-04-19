@@ -79,6 +79,7 @@ function getDefaultCliConfig() {
         baseUrl: process.env.NIYAM_CLI_BASE_URL || process.env.NIYAM_BASE_URL || 'http://127.0.0.1:3000',
         agentToken: process.env.NIYAM_AGENT_TOKEN || '',
         requester: process.env.NIYAM_CLI_REQUESTER || '',
+        sessionCookie: '',
         connectTimeoutMs: parseIntEnv(process.env.NIYAM_CLI_CONNECT_TIMEOUT_MS, 5000),
         pollIntervalMs: parseIntEnv(process.env.NIYAM_CLI_POLL_INTERVAL_MS, 1000),
         interactivePatterns: DEFAULT_INTERACTIVE_PATTERNS,

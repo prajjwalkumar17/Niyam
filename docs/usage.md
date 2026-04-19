@@ -5,7 +5,9 @@ This guide covers how teams use Niyam once it is running.
 Related docs:
 
 - [Local setup](./local_setup.md)
-- [CLI wrapper and team mode](./cli_wrapper.md)
+- [Individual setup](./individual_setup.md)
+- [Team setup](./team_setup.md)
+- [CLI wrapper](./cli_wrapper.md)
 - [Feature guide](./features.md)
 - [API reference](./api_reference.md)
 - [Configuration reference](./configuration.md)
@@ -252,7 +254,11 @@ After install:
 - `niyam-off` disables interception in the current shell
 - `npm run cli:remove` fully removes the wrapper from the shell rc file
 
-For the full workflow, see [CLI wrapper and team mode](./cli_wrapper.md).
+For the full workflow, see:
+
+- [Individual setup](./individual_setup.md)
+- [Team setup](./team_setup.md)
+- [CLI wrapper](./cli_wrapper.md)
 
 There is a small local client in [agent/client.js](/Users/prajjwal.kumar/Projects/Niyam/agent/client.js:1).
 

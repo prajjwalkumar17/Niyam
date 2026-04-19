@@ -848,6 +848,86 @@ test('niyam-cli env overrides stale config values', async () => {
     assert.equal(dispatchJson.route, 'REMOTE_EXEC');
 });
 
+test('niyam-cli local user login lets wrapper dispatch commands as the signed-in user', async () => {
+    const createUser = await apiJson('/api/users', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            username: 'cli-local-user',
+            displayName: 'CLI Local User',
+            password: 'cli-local-pass',
+            enabled: true,
+            roles: [],
+            approvalCapabilities: {
+                canApproveMedium: false,
+                canApproveHigh: false
+            }
+        }
+    });
+    assert.equal(createUser.status, 201);
+
+    const fakeHome = path.join(tempRoot, 'cli-local-home');
+    const fakeConfigHome = path.join(tempRoot, 'cli-local-config');
+    await fsPromises.mkdir(fakeHome, { recursive: true });
+    await fsPromises.mkdir(fakeConfigHome, { recursive: true });
+
+    const cliEnv = {
+        HOME: fakeHome,
+        XDG_CONFIG_HOME: fakeConfigHome,
+        NIYAM_CLI_BASE_URL: baseUrl,
+        NIYAM_AGENT_TOKEN: 'dev-token',
+        NIYAM_CLI_REQUESTER: 'niyam-agent'
+    };
+
+    const login = await runNodeScript('bin/niyam-cli.js', cliEnv, [
+        'login',
+        '--username',
+        'cli-local-user',
+        '--password',
+        'cli-local-pass'
+    ]);
+    assert.equal(login.status, 0, login.stderr);
+    assert.match(login.stdout, /Signed in as cli-local-user/);
+
+    const status = await runNodeScript('bin/niyam-cli.js', cliEnv, ['status']);
+    assert.equal(status.status, 0, status.stderr);
+    assert.ok(status.stdout.includes('Local session: configured'));
+    assert.ok(status.stdout.includes('Auth mode: local-user-session'));
+    assert.ok(status.stdout.includes('Principal: cli-local-user · user'));
+
+    const dispatch = await runNodeScript('bin/niyam-cli.js', cliEnv, [
+        'dispatch',
+        '--json',
+        '--command',
+        'ls public',
+        '--shell',
+        'zsh',
+        '--session-id',
+        'cli-local-user-dispatch',
+        '--first-token',
+        'ls',
+        '--first-token-type',
+        'external',
+        '--working-dir',
+        ROOT_DIR
+    ]);
+    assert.equal(dispatch.status, 0, dispatch.stderr);
+    const dispatchJson = JSON.parse(dispatch.stdout);
+    assert.equal(dispatchJson.route, 'REMOTE_EXEC');
+
+    const command = await waitForCommand(dispatchJson.commandId);
+    assert.equal(command.requester, 'cli-local-user');
+
+    const logout = await runNodeScript('bin/niyam-cli.js', cliEnv, ['logout']);
+    assert.equal(logout.status, 0, logout.stderr);
+    assert.match(logout.stdout, /Signed out of local user session/);
+
+    const statusAfterLogout = await runNodeScript('bin/niyam-cli.js', cliEnv, ['status']);
+    assert.equal(statusAfterLogout.status, 0, statusAfterLogout.stderr);
+    assert.ok(statusAfterLogout.stdout.includes('Local session: missing'));
+    assert.ok(statusAfterLogout.stdout.includes('Auth mode: agent-token'));
+});
+
 test('niyam-cli falls back to local execution when the server is unreachable', async () => {
     const localOutputPath = path.join(tempRoot, 'dispatch-local-output.txt');
     const cliEnv = {

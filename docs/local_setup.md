@@ -4,8 +4,10 @@ Use this guide if you want the fastest path from clone to a working Niyam dashbo
 
 Related docs:
 
+- [Individual setup](./individual_setup.md)
+- [Team setup](./team_setup.md)
 - [Usage guide](./usage.md)
-- [CLI wrapper and team mode](./cli_wrapper.md)
+- [CLI wrapper](./cli_wrapper.md)
 - [Feature guide](./features.md)
 - [API reference](./api_reference.md)
 - [Configuration reference](./configuration.md)
@@ -184,7 +186,11 @@ That mode:
 - streams logs to the terminal
 - writes a timestamped log file under `.local/logs/`
 
-If you want the full shell and team workflow after setup, continue with [CLI wrapper and team mode](./cli_wrapper.md).
+If you want the full shell and identity workflow after setup, continue with:
+
+- [Individual setup](./individual_setup.md)
+- [Team setup](./team_setup.md)
+- [CLI wrapper](./cli_wrapper.md)
 
 ## Manual Start
 

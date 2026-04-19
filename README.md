@@ -14,6 +14,8 @@
 
 <p align="center">
   <a href="./docs/local_setup.md">Local Setup</a> ·
+  <a href="./docs/individual_setup.md">Individual Setup</a> ·
+  <a href="./docs/team_setup.md">Team Setup</a> ·
   <a href="./docs/cli_wrapper.md">CLI Wrapper</a> ·
   <a href="./docs/usage.md">Usage</a> ·
   <a href="./docs/api_reference.md">API</a> ·
@@ -94,7 +96,9 @@ Windows users should start with [Local setup](./docs/local_setup.md), which incl
 ## Start Here
 
 - [Local setup](./docs/local_setup.md): macOS, Linux, Windows, first-run demo flow, curl examples
-- [CLI wrapper and team mode](./docs/cli_wrapper.md): installation, toggles, fallback behavior, dual approval, and team workflows
+- [Individual setup](./docs/individual_setup.md): one-person local setup, wrapper install, and the simplest operating model
+- [Team setup](./docs/team_setup.md): central-server rollout, multi-machine developer setup, and high-risk dual approval workflows
+- [CLI wrapper](./docs/cli_wrapper.md): install, auth modes, `login`, `logout`, `niyam-on`, `niyam-off`, and removal commands
 - [Usage guide](./docs/usage.md): approvals, packs, wrapper mode, operator flow
 - [Feature guide](./docs/features.md): simulation, templates, redaction
 - [API reference](./docs/api_reference.md): endpoints and payloads

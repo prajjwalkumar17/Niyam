@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const readline = require('readline');
 
 const AgentClient = require('../agent/client');
 const { ensureCliConfig, loadCliConfig } = require('../cli/config');
@@ -48,6 +49,10 @@ async function main(argv) {
             return handleDispatch(parsed);
         case 'report-local-result':
             return handleReportLocalResult(parsed);
+        case 'login':
+            return handleLogin(parsed);
+        case 'logout':
+            return handleLogout();
         case 'status':
             return handleStatus();
         case 'uninstall':
@@ -222,6 +227,59 @@ async function handleReportLocalResult(parsed) {
     return 0;
 }
 
+async function handleLogin(parsed) {
+    const { configPath, config } = loadCliConfig();
+    const username = parsed.options.username || await promptForInput('Username');
+    const password = parsed.options.password || await promptForSecret('Password');
+
+    if (!username) {
+        throw new Error('Login requires a username');
+    }
+    if (!password) {
+        throw new Error('Login requires a password');
+    }
+
+    const client = new AgentClient({
+        baseUrl: config.baseUrl,
+        timeout: config.connectTimeoutMs
+    });
+    const result = await client.loginLocalUser(username, password);
+    ensureCliConfig({
+        sessionCookie: result.sessionCookie
+    }, { applyEnvOverrides: false });
+
+    console.log(`Signed in as ${result.principal.identifier}`);
+    console.log(`Config: ${configPath}`);
+    return 0;
+}
+
+async function handleLogout() {
+    const { configPath, config } = loadCliConfig();
+    if (!config.sessionCookie) {
+        console.log('No local user session is configured.');
+        return 0;
+    }
+
+    try {
+        const client = new AgentClient({
+            baseUrl: config.baseUrl,
+            sessionCookie: config.sessionCookie,
+            timeout: config.connectTimeoutMs
+        });
+        await client.logoutLocalUser();
+    } catch (error) {
+        // Clear the stale local session even if the server is unavailable.
+    }
+
+    ensureCliConfig({
+        sessionCookie: ''
+    }, { applyEnvOverrides: false });
+
+    console.log('Signed out of local user session.');
+    console.log(`Config: ${configPath}`);
+    return 0;
+}
+
 async function handleStatus() {
     const { configPath, config } = loadCliConfig();
     const shells = ['zsh', 'bash'];
@@ -229,25 +287,35 @@ async function handleStatus() {
     console.log(`Base URL: ${config.baseUrl}`);
     console.log(`Requester: ${config.requester || 'missing'}`);
     console.log(`Agent token: ${config.agentToken ? 'configured' : 'missing'}`);
+    console.log(`Local session: ${config.sessionCookie ? 'configured' : 'missing'}`);
+    console.log(`Auth mode: ${describeAuthMode(config)}`);
 
     shells.forEach((shell) => {
         console.log(`${shell}: ${isShellSnippetInstalled(shell) ? 'installed' : 'not installed'} (${getShellRcPath(shell)})`);
     });
 
-    if (!config.agentToken) {
+    if (!hasAnyCliAuth(config)) {
         return 0;
     }
 
-    const client = buildClient(config);
     try {
-        const [health, me] = await Promise.all([
-            client.getHealth(),
-            client.getCurrentPrincipal()
-        ]);
+        const healthClient = new AgentClient({
+            baseUrl: config.baseUrl,
+            timeout: config.connectTimeoutMs
+        });
+        const health = await healthClient.getHealth();
         console.log(`Health: ${health.status} (${health.env})`);
-        console.log(`Principal: ${me.principal.identifier} · ${me.principal.type}`);
     } catch (error) {
         console.log(`Health: unavailable (${error.message})`);
+        return 0;
+    }
+
+    try {
+        const client = buildClient(config);
+        const me = await client.getCurrentPrincipal();
+        console.log(`Principal: ${me.principal.identifier} · ${me.principal.type}`);
+    } catch (error) {
+        console.log(`Principal: unavailable (${error.message})`);
     }
 
     return 0;
@@ -329,6 +397,14 @@ function parseMetadata(metadataJson, defaults) {
 }
 
 function buildClient(config) {
+    if (config.sessionCookie) {
+        return new AgentClient({
+            baseUrl: config.baseUrl,
+            sessionCookie: config.sessionCookie,
+            timeout: config.connectTimeoutMs
+        });
+    }
+
     if (!config.agentToken) {
         throw new Error('Agent token is missing from the CLI config');
     }
@@ -342,6 +418,20 @@ function buildClient(config) {
         apiToken: config.agentToken,
         timeout: config.connectTimeoutMs
     });
+}
+
+function hasAnyCliAuth(config) {
+    return Boolean(config.sessionCookie || (config.agentToken && config.requester));
+}
+
+function describeAuthMode(config) {
+    if (config.sessionCookie) {
+        return 'local-user-session';
+    }
+    if (config.agentToken && config.requester) {
+        return 'agent-token';
+    }
+    return 'none';
 }
 
 async function waitForRemoteCommand(client, commandId, pollIntervalMs) {
@@ -545,6 +635,72 @@ function parseAgentTokenMap(rawValue) {
     }
 }
 
+async function promptForInput(label) {
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+        return '';
+    }
+
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+    });
+
+    try {
+        return await new Promise((resolve) => {
+            rl.question(`${label}: `, resolve);
+        });
+    } finally {
+        rl.close();
+    }
+}
+
+async function promptForSecret(label) {
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+        return '';
+    }
+
+    process.stdout.write(`${label}: `);
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.setEncoding('utf8');
+
+    return await new Promise((resolve) => {
+        let value = '';
+        const onData = (chunk) => {
+            const input = String(chunk || '');
+            if (input === '\r' || input === '\n') {
+                process.stdout.write('\n');
+                cleanup();
+                resolve(value);
+                return;
+            }
+
+            if (input === '\u0003') {
+                process.stdout.write('\n');
+                cleanup();
+                process.exit(130);
+            }
+
+            if (input === '\u007f' || input === '\b' || input === '\x1b[3~') {
+                if (value.length > 0) {
+                    value = value.slice(0, -1);
+                }
+                return;
+            }
+
+            value += input;
+        };
+
+        const cleanup = () => {
+            process.stdin.removeListener('data', onData);
+            process.stdin.setRawMode(false);
+            process.stdin.pause();
+        };
+
+        process.stdin.on('data', onData);
+    });
+}
+
 function printUsage() {
     console.log(`niyam-cli ${version}
 
@@ -554,6 +710,8 @@ Commands:
   niyam-cli shell init zsh|bash
   niyam-cli dispatch --command "ls public" [--json]
   niyam-cli report-local-result --dispatch-id <id> --exit-code <n> --duration-ms <n>
+  niyam-cli login [--username <name>] [--password <secret>]
+  niyam-cli logout
   niyam-cli status
   niyam-cli uninstall [--shell zsh|bash] [--purge-config]
   niyam-cli disable [--shell zsh|bash]`);

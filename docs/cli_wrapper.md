@@ -1,75 +1,27 @@
-# CLI Wrapper And Team Mode
+# CLI Wrapper
 
-This is the shortest path to understanding what makes Niyam feel like a real operational product instead of only a dashboard.
+Use this guide when you want to understand the wrapper itself: what it intercepts, how it authenticates, and which commands operators use day to day.
 
-The CLI wrapper and team mode are the two features that move Niyam from:
+If you want end-to-end setup flows first:
 
-- a policy engine you visit occasionally
-
-to:
-
-- a command-governance surface your team actually works through every day
-
-Related docs:
-
+- [Individual setup](./individual_setup.md)
+- [Team setup](./team_setup.md)
 - [Local setup](./local_setup.md)
-- [Usage guide](./usage.md)
-- [Feature guide](./features.md)
-- [Configuration reference](./configuration.md)
 
-## Why This Matters
+## What The Wrapper Does
 
-The dashboard is useful, but the wrapper is what changes operator behavior.
+Once installed, the wrapper sits in front of an interactive `zsh` or `bash` shell.
 
-Instead of asking people to:
-
-- remember a special submission flow
-- copy commands into a web form
-- switch contexts every time they need review
-
-Niyam can sit directly in front of the shell.
-
-That means:
-
-- normal commands still feel like normal commands
-- approvals happen against the exact command line that was typed
-- risky commands are visible before they execute
-- shell activity becomes auditable without forcing a separate tool
-
-For teams, the second half is just as important.
-
-Team mode gives you:
-
-- local user accounts
-- admin-managed access
-- self-signup requests when enabled
-- distinct approver identities for `HIGH` risk commands
-- shared pending queues and audit history across the whole team
-
-That is the real pitch:
-
-- shell-native command governance for individual operators
-- team-native approval and audit for larger engineering environments
-
-## What The CLI Wrapper Does
-
-Once installed, the wrapper intercepts commands typed into supported interactive shells.
+It intercepts what the user types and sends it to Niyam before execution.
 
 Behavior:
 
-- simple external commands can be routed to Niyam for approval and execution
-- shell-native commands such as `cd`, shell functions, aliases, and interactive programs are still classified and audited correctly
-- commands continue to feel local to the operator
-- if the Niyam server is unavailable before dispatch, the shell falls back to local execution
+- simple external commands can be routed through Niyam for policy evaluation, approval, and execution
+- shell-native commands such as `cd`, aliases, and interactive tools are still classified correctly
+- if the server is unavailable before dispatch, the wrapper falls back to local execution
+- lifecycle updates are printed inline in the shell
 
-Examples:
-
-- `ls public`
-- `git push --no-verify`
-- `rm -rf build`
-- `cd ..`
-
-The wrapper also reports lifecycle updates inline, for example:
+Example output:
 
 ```text
 niyam-cli: pending approval for <command-id>
@@ -78,81 +30,52 @@ niyam-cli: approved <command-id>
 niyam-cli: completed <command-id>
 ```
 
-## What Team Mode Does
+## Auth Modes
 
-Team mode is optional.
+The wrapper supports two auth modes.
 
-Single-user deployments still work without it.
+### 1. Local User Session
 
-When team mode is enabled:
+Use this when a real person should appear in the dashboard as themselves.
 
-- the login screen exposes `Request Access`
-- admins can approve or reject signup requests
-- admins can also create users directly from the `Users` page
-- users can sign in with their own local credentials
-- `HIGH` risk approvals can be satisfied by two distinct signed-in people
+```bash
+node /Users/prajjwal.kumar/Projects/Niyam/bin/niyam-cli.js login --username alice --password 'secret'
+```
 
-This is the right operating model for:
+When `status` shows:
 
-- AI agent oversight
-- dev-tool governance
-- release approval gates
-- regulated or audit-heavy command flows
+```text
+Auth mode: local-user-session
+Principal: alice · user
+```
 
-## The Best Demo Flow
+then CLI-originated commands appear in Niyam as `alice`.
 
-If you want to show Niyam well, do it in this order:
+### 2. Agent Token
 
-1. Start the server with `./oneclick-setup.sh`
-2. Install the wrapper in a second terminal
-3. Type a normal command such as `git status`
-4. Type a high-risk command and show it pause for approval
-5. Approve it once and show `approval 1/2 recorded`
-6. Approve it a second time from another signed-in user
-7. Open `Audit Log`, `Pending`, `Users`, and `Workspace`
+Use this for bots, shared automation, or single-user local testing.
 
-That shows the full value chain:
+This mode uses:
 
-- shell interception
-- policy decision
-- multi-user approval
-- centralized audit
+- `NIYAM_CLI_BASE_URL`
+- `NIYAM_AGENT_TOKEN`
+- `NIYAM_CLI_REQUESTER`
 
-## Setup With Oneclick
+When `status` shows:
 
-Use this if you want the easiest path.
+```text
+Auth mode: agent-token
+Principal: niyam-agent · agent
+```
+
+then CLI-originated commands appear as that agent identity.
+
+## Install Commands
+
+Install the wrapper into the current shell:
 
 ```bash
 cd /Users/prajjwal.kumar/Projects/Niyam
-./oneclick-setup.sh
-```
-
-Choose one of these:
-
-- `1. Local development (single-user or team mode)`
-- `2. Self-hosted prep (single-user or team mode)`
-- `3. Start existing server env and stream logs (single-user or team mode)`
-
-During setup, oneclick will ask:
-
-```text
-Activate team mode (self-signup requests + admin approval)? [y/N]
-```
-
-Answer:
-
-- `n` for admin-created users only
-- `y` for team signup requests plus admin approval
-
-For local development, oneclick can also open a second terminal with the CLI wrapper ready.
-
-## Install The CLI Wrapper
-
-If oneclick did not already open a ready-to-use shell, install it manually.
-
-From the repo root:
-
-```bash
 npm run cli:install
 source ~/.zshrc
 ```
@@ -160,32 +83,35 @@ source ~/.zshrc
 For `bash`:
 
 ```bash
+cd /Users/prajjwal.kumar/Projects/Niyam
 npm run cli:install -- --shell bash
 source ~/.bashrc
 ```
 
-Check the current status:
+One-command helper after install:
+
+```bash
+niyam-on
+```
+
+## Daily Commands
+
+Check wrapper status:
 
 ```bash
 node /Users/prajjwal.kumar/Projects/Niyam/bin/niyam-cli.js status
 ```
 
-If everything is configured correctly, you should see:
-
-- configured base URL
-- configured requester
-- configured agent token
-- installed shell wrapper
-- live health check
-
-## Daily Wrapper Commands
-
-After install, the shortest controls are:
-
-Turn interception on in the current shell:
+Sign in as a local dashboard user:
 
 ```bash
-niyam-on
+node /Users/prajjwal.kumar/Projects/Niyam/bin/niyam-cli.js login --username <user> --password '<password>'
+```
+
+Sign out of the local user session:
+
+```bash
+node /Users/prajjwal.kumar/Projects/Niyam/bin/niyam-cli.js logout
 ```
 
 Turn interception off in the current shell:
@@ -194,7 +120,13 @@ Turn interception off in the current shell:
 niyam-off
 ```
 
-Fully remove the wrapper:
+Turn interception back on in the current shell:
+
+```bash
+niyam-on
+```
+
+Remove the wrapper from the shell config:
 
 ```bash
 cd /Users/prajjwal.kumar/Projects/Niyam
@@ -202,117 +134,55 @@ npm run cli:remove
 source ~/.zshrc
 ```
 
-## Team Mode Workflows
+Fully uninstall and purge saved CLI config:
 
-There are two ways to add people.
+```bash
+cd /Users/prajjwal.kumar/Projects/Niyam
+node bin/niyam-cli.js uninstall --purge-config
+source ~/.zshrc
+```
 
-### 1. Admin-Created Users
+## Recommended Command Flow
 
-This works in both single-user mode and team mode.
+For a human operator:
 
-Admin flow:
+1. Install the wrapper once
+2. Log into the CLI as a local user
+3. Use the shell normally
+4. Check `status` if command identity looks wrong
 
-1. Sign in as admin
-2. Open `Users`
-3. Click `New User`
-4. Set:
-   - username
-   - initial password
-   - admin or not
-   - `Can approve MEDIUM`
-   - `Can approve HIGH`
+For a bot or shared automation shell:
 
-This is the best model when the admin wants tight control from day one.
+1. Install the wrapper once
+2. Configure agent-token env vars
+3. Do not run `niyam-cli login`
+4. Use the shell in shared agent mode
 
-### 2. Self-Signup Requests
+## Troubleshooting
 
-This only appears when team mode is enabled.
+If commands are showing as the wrong identity:
 
-User flow:
+```bash
+node /Users/prajjwal.kumar/Projects/Niyam/bin/niyam-cli.js status
+```
 
-1. Open the login screen
-2. Click `Request Access`
-3. Enter username, optional display name, and password
-4. Wait for admin approval
+Check:
 
-Admin flow:
+- `Auth mode`
+- `Principal`
+- `Base URL`
 
-1. Open `Users`
-2. Review `Signup Requests`
-3. Approve or reject
-4. Assign admin access and approval capability as needed
+If a remote user is pointing at `http://127.0.0.1:3000`, that is wrong unless they are on the server machine. Remote developer machines must point at a shared reachable URL.
 
-## How High-Risk Approval Works
+If the wrapper feels stale after an update:
 
-`HIGH` risk commands still require two distinct approvers excluding the requester.
+```bash
+cd /Users/prajjwal.kumar/Projects/Niyam
+npm run cli:install
+exec zsh
+```
 
-That means:
+## Related Setup Guides
 
-- one approver is not enough
-- the requester cannot self-approve
-- one user cannot satisfy both approvals
-
-A practical team flow:
-
-1. `niyam-agent` or a developer submits a `HIGH` risk command
-2. Approver A signs in and approves it
-3. The command stays pending and shows `1/2 approvals`
-4. Approver B signs in and gives the second approval
-5. Only then does execution continue
-
-This is why team mode matters.
-
-Without distinct identities, dual approval is hard to operate cleanly.
-
-## Workspace Page
-
-Niyam includes a `Workspace` tab in the dashboard.
-
-Use it to see:
-
-- current signed-in user
-- team mode state
-- dashboard URL
-- CLI wrapper install and removal commands
-- current-shell toggle commands
-- server profile, env file, data dir, allowed roots, and execution mode for admins
-
-This is the fastest place to orient someone new to the instance.
-
-## What To Show In A Product Demo
-
-If you are positioning Niyam to a team, emphasize this sequence:
-
-- install once with oneclick
-- install the shell wrapper
-- keep using the shell normally
-- let Niyam intercept, classify, and gate commands
-- let two different people approve the same high-risk action
-- show the resulting audit trail
-
-That tells a stronger story than “dashboard plus rules”.
-
-It shows:
-
-- workflow continuity
-- team accountability
-- policy-backed execution
-- auditable approvals
-
-## Operational Notes
-
-- the wrapper is currently designed for interactive `zsh` and `bash`
-- if the server is unreachable before dispatch, commands fall back to local execution
-- single-user mode remains fully supported
-- team mode is optional, not required
-- local users are still local Niyam accounts, not SSO identities
-
-## Recommended Positioning
-
-If you need one sentence for the product:
-
-Niyam gives teams a shell-native approval and audit layer for human and AI command execution.
-
-If you need the slightly longer version:
-
-Niyam turns normal terminal usage into a governed workflow, with policy simulation, inline approvals, dual approval for high-risk actions, and a shared operator surface for teams.
+- [Individual setup](./individual_setup.md)
+- [Team setup](./team_setup.md)

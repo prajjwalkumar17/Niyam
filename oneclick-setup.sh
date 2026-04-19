@@ -391,6 +391,45 @@ print_cli_wrapper_instructions() {
     printf '  niyam-off\n'
 }
 
+suggest_shared_base_url() {
+    local first_origin
+
+    if [[ -n "$ALLOWED_ORIGINS" ]]; then
+        first_origin=${ALLOWED_ORIGINS%%,*}
+        first_origin=$(printf '%s' "$first_origin" | xargs)
+        case "$first_origin" in
+            http://127.0.0.1:*|http://localhost:*|https://127.0.0.1:*|https://localhost:*)
+                ;;
+            http://*|https://*)
+                printf '%s' "$first_origin"
+                return
+                ;;
+        esac
+    fi
+
+    if [[ -n "$DOMAIN" ]]; then
+        printf 'https://%s' "$DOMAIN"
+        return
+    fi
+
+    printf 'http://<server-host>:%s' "$PORT"
+}
+
+print_multi_machine_wrapper_instructions() {
+    local shared_base_url
+    shared_base_url=$(suggest_shared_base_url)
+
+    printf 'For other developer machines using this same Niyam server:\n'
+    printf '  - Niyam must be reachable over the network; localhost only works on this machine.\n'
+    printf '  - On each developer machine, in that machine'"'"'s Niyam checkout:\n'
+    printf '      export NIYAM_CLI_BASE_URL=%s\n' "$(shell_quote "$shared_base_url")"
+    printf '      npm run cli:install\n'
+    printf '      source ~/.zshrc\n'
+    printf '      node bin/niyam-cli.js login --username <user> --password <password>\n'
+    printf '  - Commands from that shell will then appear in this dashboard as that signed-in user.\n'
+    printf '\n'
+}
+
 print_local_notes() {
     bold "Local setup notes"
     printf '  - Admin password: dashboard sign-in credential\n'
@@ -525,6 +564,7 @@ start_server_with_logs() {
     info "Streaming logs to terminal and $log_file"
     print_dashboard_access
     print_cli_wrapper_instructions
+    print_multi_machine_wrapper_instructions
     open_cli_wrapper_terminal || true
     (
         set -a
@@ -585,6 +625,7 @@ print_summary() {
         printf '  set -a; source %s; set +a; npm start\n' "$ENV_FILE"
         printf '\n'
         print_cli_wrapper_instructions
+        print_multi_machine_wrapper_instructions
     else
         printf 'Deploy artifacts:\n'
         printf '  .deploy/niyam.env\n'
@@ -594,6 +635,7 @@ print_summary() {
         printf '  .deploy/Caddyfile\n'
         printf '\n'
         print_cli_wrapper_instructions
+        print_multi_machine_wrapper_instructions
     fi
 }
 
