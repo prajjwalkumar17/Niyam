@@ -521,25 +521,26 @@ function updateConnectionStatus(connected) {
 
 function handleWebSocketMessage(msg) {
     const { type, data } = msg;
+    const commandLine = buildCommandLineDisplay(data);
     
     switch (type) {
         case 'command_submitted':
             updatePendingBadge();
-            showNotification(`New command: ${data.command}`, 'info');
+            showNotification(`New command: ${commandLine || data.command}`, 'info');
             break;
         case 'command_approved':
             updatePendingBadge();
-            showNotification(`Command approved: ${data.command}`, 'success');
+            showNotification(`Command approved: ${commandLine || data.command}`, 'success');
             break;
         case 'command_rejected':
             updatePendingBadge();
-            showNotification(`Command rejected: ${data.command}`, 'error');
+            showNotification(`Command rejected: ${commandLine || data.command}`, 'error');
             break;
         case 'command_completed':
-            showNotification(`Command completed: ${data.command}`, 'success');
+            showNotification(`Command completed: ${commandLine || data.command}`, 'success');
             break;
         case 'command_failed':
-            showNotification(`Command failed: ${data.command}`, 'error');
+            showNotification(`Command failed: ${commandLine || data.command}`, 'error');
             break;
         case 'command_timeout':
             updatePendingBadge();
@@ -884,4 +885,16 @@ function escapeHtml(text) {
 
 function parseArgsInput(argsStr) {
     return argsStr ? argsStr.split(',').map(arg => arg.trim()).filter(Boolean) : [];
+}
+
+function buildCommandLineDisplay(record) {
+    if (!record) return '';
+    if (typeof record === 'string') return record.trim();
+
+    const command = String(record.command || '').trim();
+    const args = Array.isArray(record.args)
+        ? record.args.map(arg => String(arg || '').trim()).filter(Boolean)
+        : [];
+
+    return [command, ...args].filter(Boolean).join(' ').trim();
 }

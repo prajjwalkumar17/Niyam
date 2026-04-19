@@ -13,6 +13,8 @@
     "init-db": "node db/init.js",
     "setup:interactive": "bash ./oneclick-setup.sh",
     "start:guided": "bash ./oneclick-setup.sh",
+    "cli:install": "node bin/niyam-cli.js setup",
+    "cli:remove": "node bin/niyam-cli.js uninstall",
     "smoke": "sh scripts/smoke.sh",
     "smoke:wrapper": "NIYAM_SMOKE_WRAPPER_TEST=1 sh scripts/smoke.sh",
     "smoke:dashboard": "node scripts/dashboard_smoke.js",

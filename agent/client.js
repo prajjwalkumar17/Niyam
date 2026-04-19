@@ -207,7 +207,9 @@ class AgentClient {
                     try {
                         const parsed = JSON.parse(data);
                         if (res.statusCode >= 400) {
-                            reject(new Error(parsed.error || `HTTP ${res.statusCode}`));
+                            const error = new Error(parsed.error || `HTTP ${res.statusCode}`);
+                            error.statusCode = res.statusCode;
+                            reject(error);
                         } else {
                             resolve(parsed);
                         }
@@ -217,10 +219,15 @@ class AgentClient {
                 });
             });
             
-            req.on('error', reject);
+            req.on('error', (error) => {
+                error.isReachabilityError = true;
+                reject(error);
+            });
             req.on('timeout', () => {
                 req.destroy();
-                reject(new Error('Request timeout'));
+                const error = new Error('Request timeout');
+                error.isReachabilityError = true;
+                reject(error);
             });
             
             if (body) {

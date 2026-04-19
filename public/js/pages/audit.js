@@ -236,6 +236,7 @@ async function loadAuditLog() {
         timeline.innerHTML = data.entries.map(entry => {
             const config = eventConfig[entry.event_type] || { icon: renderEventChip('EV'), class: '' };
             const detailsHtml = formatAuditDetails(entry);
+            const commandLine = formatAuditCommandLine(entry.details || {});
             
             return `
                 <div class="timeline-item fade-in ${config.class}">
@@ -243,6 +244,7 @@ async function loadAuditLog() {
                     <div class="timeline-title">
                         ${config.icon} ${formatEventType(entry.event_type)}
                         ${entry.entity_type ? `<span class="timeline-entity">· ${entry.entity_type}</span>` : ''}
+                        ${commandLine ? ` <code style="color:var(--accent-cyan)">${escapeHtml(commandLine)}</code>` : ''}
                         ${entry.redacted ? `<span class="status-badge rejected">Redacted</span>` : ''}
                     </div>
                     <div class="timeline-details">
@@ -265,13 +267,14 @@ async function loadAuditLog() {
 function formatAuditDetails(entry) {
     const details = entry.details || {};
     let html = '';
+    const commandLine = formatAuditCommandLine(details);
     
     if (entry.entity_id) {
         html += `<div><strong>Entity ID:</strong> <code style="color:var(--accent-cyan)">${escapeHtml(entry.entity_id)}</code></div>`;
     }
     
-    if (details.command) {
-        html += `<div><strong>Command:</strong> <code style="color:var(--accent-cyan)">${escapeHtml(details.command)}</code></div>`;
+    if (commandLine) {
+        html += `<div><strong>Command:</strong> <code style="color:var(--accent-cyan)">${escapeHtml(commandLine)}</code></div>`;
     }
     
     if (details.risk_level) {
@@ -327,6 +330,18 @@ function formatAuditDetails(entry) {
     }
     
     return html;
+}
+
+function formatAuditCommandLine(details) {
+    if (!details || !details.command) {
+        return '';
+    }
+
+    const args = Array.isArray(details.args)
+        ? details.args.map(arg => String(arg || '').trim()).filter(Boolean)
+        : [];
+
+    return [String(details.command).trim(), ...args].filter(Boolean).join(' ').trim();
 }
 
 function renderAuditPagination(currentCount) {

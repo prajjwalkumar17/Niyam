@@ -69,6 +69,11 @@ function renderZshSnippet(cliBinPath) {
 export NIYAM_CLI_BIN=${quotedBin}
 export NIYAM_INTERCEPT_SESSION_ID="\${NIYAM_INTERCEPT_SESSION_ID:-\${HOST:-shell}-$$}"
 
+niyam-off() {
+  command "$NIYAM_CLI_BIN" uninstall --shell zsh || return $?
+  exec zsh -l
+}
+
 __niyam_zsh_type() {
   local token="$1"
   local desc
@@ -176,6 +181,11 @@ case $- in
 esac
 export NIYAM_CLI_BIN=${quotedBin}
 export NIYAM_INTERCEPT_SESSION_ID="\${NIYAM_INTERCEPT_SESSION_ID:-\${HOSTNAME:-shell}-$$}"
+
+niyam-off() {
+  command "$NIYAM_CLI_BIN" uninstall --shell bash || return $?
+  exec bash -l
+}
 
 __niyam_bash_first_token() {
   local raw="$1"

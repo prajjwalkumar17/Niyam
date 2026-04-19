@@ -25,6 +25,7 @@ RUN_GROUP=""
 SHOULD_START="n"
 SHOULD_RENDER="n"
 SHOULD_STAGE="n"
+SHOULD_OPEN_CLI_TERMINAL="n"
 BACKUP_PASSPHRASE=""
 REUSE_EXISTING_ENV="n"
 START_ONLY="n"
@@ -59,6 +60,56 @@ random_secret() {
 
 timestamp_for_path() {
     date '+%Y-%m-%dT%H-%M-%S'
+}
+
+detect_cli_shell() {
+    local shell_name
+    shell_name=$(basename "${SHELL:-zsh}")
+    case "$shell_name" in
+        zsh|bash) printf '%s' "$shell_name" ;;
+        *) printf 'zsh' ;;
+    esac
+}
+
+shell_rc_path() {
+    local shell_name=${1:-zsh}
+    case "$shell_name" in
+        bash) printf '%s/.bashrc' "$HOME" ;;
+        *) printf '%s/.zshrc' "$HOME" ;;
+    esac
+}
+
+can_open_cli_terminal() {
+    [[ "$(uname -s)" == "Darwin" ]] || return 1
+    command -v osascript >/dev/null 2>&1 || return 1
+}
+
+escape_applescript_string() {
+    local value=$1
+    value=${value//\\/\\\\}
+    value=${value//\"/\\\"}
+    printf '%s' "$value"
+}
+
+open_cli_wrapper_terminal() {
+    if [[ "$SHOULD_OPEN_CLI_TERMINAL" != "y" ]]; then
+        return 0
+    fi
+
+    if ! can_open_cli_terminal; then
+        warn "Automatic terminal launch is not available on this machine"
+        return 1
+    fi
+
+    local shell_name rc_path command
+    shell_name=$(detect_cli_shell)
+    rc_path=$(shell_rc_path "$shell_name")
+    command="cd $(shell_quote "$ROOT_DIR"); npm run cli:install -- --shell $shell_name; source $(shell_quote "$rc_path"); printf '\nNiyam CLI wrapper ready in this terminal.\n'"
+
+    osascript -e "tell application \"Terminal\" to activate" \
+        -e "tell application \"Terminal\" to do script \"$(escape_applescript_string "$command")\"" >/dev/null
+
+    info "Opened a new Terminal window with the Niyam CLI wrapper setup"
 }
 
 listening_pids_on_port() {
@@ -241,45 +292,14 @@ print_dashboard_access() {
     printf '\n'
 }
 
-default_cli_base_url() {
-    if [[ -n "${DOMAIN:-}" ]]; then
-        printf 'https://%s' "$DOMAIN"
-    else
-        printf 'http://127.0.0.1:%s' "$PORT"
-    fi
-}
-
-default_agent_token() {
-    if [[ -n "${AGENT_TOKEN:-}" ]]; then
-        printf '%s' "$AGENT_TOKEN"
-        return
-    fi
-
-    if [[ -z "${NIYAM_AGENT_TOKENS:-}" ]]; then
-        return
-    fi
-
-    node -e 'const raw = process.argv[1] || "{}"; const parsed = JSON.parse(raw); process.stdout.write(String(parsed["niyam-agent"] || Object.values(parsed)[0] || ""));' "$NIYAM_AGENT_TOKENS"
-}
-
 print_cli_wrapper_instructions() {
-    local base_url token
-    base_url=$(default_cli_base_url)
-    token=$(default_agent_token)
-
     printf 'To enable the CLI wrapper in another terminal:\n'
-    if [[ -f "$ENV_FILE" ]]; then
-        printf '  set -a; source %s; set +a\n' "$ENV_FILE"
-    fi
-    printf '  export NIYAM_CLI_BASE_URL=%s\n' "$(shell_quote "$base_url")"
-    printf '  export NIYAM_CLI_REQUESTER=niyam-agent\n'
-    if [[ -n "$token" ]]; then
-        printf '  export NIYAM_AGENT_TOKEN=%s\n' "$(shell_quote "$token")"
-    else
-        printf '  export NIYAM_AGENT_TOKEN=<niyam-agent bearer token>\n'
-    fi
-    printf '  node %s/bin/niyam-cli.js install --shell zsh\n' "$ROOT_DIR"
+    printf '  cd %s\n' "$ROOT_DIR"
+    printf '  npm run cli:install\n'
     printf '  source ~/.zshrc\n'
+    printf '\n'
+    printf 'To remove the CLI wrapper later:\n'
+    printf '  niyam-off\n'
 }
 
 print_local_notes() {
@@ -381,6 +401,7 @@ start_server() {
     info "Starting Niyam with $ENV_FILE"
     info "Dashboard will be available at http://localhost:$PORT"
     print_dashboard_access
+    open_cli_wrapper_terminal || true
     (
         set -a
         # shellcheck disable=SC1090
@@ -408,6 +429,7 @@ start_server_with_logs() {
     info "Streaming logs to terminal and $log_file"
     print_dashboard_access
     print_cli_wrapper_instructions
+    open_cli_wrapper_terminal || true
     (
         set -a
         # shellcheck disable=SC1090
@@ -515,6 +537,9 @@ configure_start_only() {
 
     DATA_DIR="$ROOT_DIR/.local/niyam"
     load_existing_env
+    if can_open_cli_terminal; then
+        SHOULD_OPEN_CLI_TERMINAL=$(prompt_yes_no "Open a second Terminal with the Niyam CLI wrapper ready?" "y")
+    fi
 }
 
 configure_local() {
@@ -544,6 +569,9 @@ configure_local() {
     METRICS_TOKEN=$(prompt_secret "Metrics token (/api/metrics access)" "$generated_metrics")
     ENV_FILE="$ROOT_DIR/.env.local"
     SHOULD_START=$(prompt_yes_no "Start the server when setup finishes?" "y")
+    if can_open_cli_terminal; then
+        SHOULD_OPEN_CLI_TERMINAL=$(prompt_yes_no "Open a second Terminal with the Niyam CLI wrapper ready?" "y")
+    fi
 }
 
 configure_selfhost() {
@@ -634,6 +662,10 @@ main() {
     fi
 
     print_summary
+
+    if [[ "$PROFILE" == "local" && "$SHOULD_START" != "y" && "$SHOULD_OPEN_CLI_TERMINAL" == "y" ]]; then
+        open_cli_wrapper_terminal || true
+    fi
 
     if [[ "$PROFILE" == "local" && "$SHOULD_START" == "y" ]]; then
         printf '\n'

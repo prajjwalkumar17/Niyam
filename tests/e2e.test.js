@@ -7,6 +7,7 @@ const fs = require('node:fs');
 const { spawn, execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const Database = require('better-sqlite3');
+const { v4: uuidv4 } = require('uuid');
 const CommandRunner = require('../executor/runner');
 const { renderShellInit } = require('../cli/shell-snippets');
 
@@ -277,6 +278,8 @@ test('secret redaction sanitizes stored command, output, and audit history', asy
     assert.equal(audit.status, 200);
     assert.equal(JSON.stringify(audit.json).includes(rawSecret), false);
     assert.ok(audit.json.entries.some(entry => entry.event_type === 'command_submitted'));
+    assert.ok(audit.json.entries.some(entry => entry.event_type === 'command_approved' && Array.isArray(entry.details?.args)));
+    assert.ok(audit.json.entries.some(entry => entry.event_type === 'command_executed' && Array.isArray(entry.details?.args)));
     assert.ok(JSON.stringify(audit.json).includes('[REDACTED]'));
 
     const exportResponse = await fetch(`${baseUrl}/api/audit/export`, {
@@ -324,6 +327,7 @@ test('niyam-cli install, status, and disable manage shell integration in a temp 
     assert.ok(fs.existsSync(configPath));
     assert.ok(fs.readFileSync(rcPath, 'utf8').includes('# >>> niyam >>>'));
     assert.ok(renderedZsh.includes('__niyam_zsh_begin_command'));
+    assert.ok(renderedZsh.includes('niyam-off()'));
     assert.ok(renderedZsh.includes('zle reset-prompt\n  print'));
 
     const zshSyntax = await execFileAsync('zsh', ['-n', rcPath], {
@@ -362,6 +366,49 @@ test('niyam-cli install, status, and disable manage shell integration in a temp 
     const disable = await runNodeScript('bin/niyam-cli.js', cliEnv, ['disable', '--shell', 'zsh']);
     assert.equal(disable.status, 0, disable.stderr);
     assert.equal(fs.readFileSync(rcPath, 'utf8').includes('# >>> niyam >>>'), false);
+});
+
+test('niyam-cli setup and uninstall provide one-command wrapper lifecycle', async () => {
+    const fakeHome = path.join(tempRoot, 'setup-home');
+    const fakeConfigHome = path.join(tempRoot, 'setup-config');
+    const envFile = path.join(tempRoot, 'setup.env');
+    await fsPromises.mkdir(fakeHome, { recursive: true });
+    await fsPromises.mkdir(fakeConfigHome, { recursive: true });
+    await fsPromises.writeFile(envFile, [
+        `NIYAM_CLI_BASE_URL='${baseUrl}'`,
+        'NIYAM_CLI_REQUESTER=niyam-agent',
+        `NIYAM_AGENT_TOKENS='{"niyam-agent":"dev-token"}'`
+    ].join('\n') + '\n', 'utf8');
+
+    const cliEnv = {
+        HOME: fakeHome,
+        XDG_CONFIG_HOME: fakeConfigHome,
+        SHELL: '/bin/zsh'
+    };
+
+    const setup = await runNodeScript('bin/niyam-cli.js', cliEnv, ['setup', '--env-file', envFile]);
+    assert.equal(setup.status, 0, setup.stderr);
+    assert.ok(setup.stdout.includes('Configured Niyam CLI for zsh'));
+
+    const rcPath = path.join(fakeHome, '.zshrc');
+    const configPath = path.join(fakeConfigHome, 'niyam', 'config.json');
+    assert.ok(fs.readFileSync(rcPath, 'utf8').includes('# >>> niyam >>>'));
+
+    const savedConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    assert.equal(savedConfig.baseUrl, baseUrl);
+    assert.equal(savedConfig.requester, 'niyam-agent');
+    assert.equal(savedConfig.agentToken, 'dev-token');
+
+    const status = await runNodeScript('bin/niyam-cli.js', cliEnv, ['status']);
+    assert.equal(status.status, 0, status.stderr);
+    assert.ok(status.stdout.includes(`Base URL: ${baseUrl}`));
+    assert.ok(status.stdout.includes('Requester: niyam-agent'));
+    assert.ok(status.stdout.includes('Agent token: configured'));
+
+    const uninstall = await runNodeScript('bin/niyam-cli.js', cliEnv, ['uninstall', '--purge-config']);
+    assert.equal(uninstall.status, 0, uninstall.stderr);
+    assert.equal(fs.readFileSync(rcPath, 'utf8').includes('# >>> niyam >>>'), false);
+    assert.equal(fs.existsSync(configPath), false);
 });
 
 test('niyam-cli env overrides stale config values', async () => {
@@ -410,6 +457,37 @@ test('niyam-cli env overrides stale config values', async () => {
     assert.equal(dispatch.status, 0, dispatch.stderr);
     const dispatchJson = JSON.parse(dispatch.stdout);
     assert.equal(dispatchJson.route, 'REMOTE_EXEC');
+});
+
+test('niyam-cli falls back to local execution when the server is unreachable', async () => {
+    const localOutputPath = path.join(tempRoot, 'dispatch-local-output.txt');
+    const cliEnv = {
+        NIYAM_AGENT_TOKEN: 'dev-token',
+        NIYAM_CLI_BASE_URL: 'http://127.0.0.1:9',
+        NIYAM_CLI_REQUESTER: 'niyam-agent'
+    };
+
+    const dispatch = await runNodeScript('bin/niyam-cli.js', cliEnv, [
+        'dispatch',
+        '--command',
+        'pwd',
+        '--shell',
+        'zsh',
+        '--session-id',
+        'cli-server-unreachable',
+        '--first-token',
+        'pwd',
+        '--first-token-type',
+        'external',
+        '--working-dir',
+        ROOT_DIR,
+        '--local-output-file',
+        localOutputPath
+    ]);
+
+    assert.equal(dispatch.status, 86);
+    assert.match(dispatch.stderr, /server unavailable, running locally/);
+    assert.equal(fs.readFileSync(localOutputPath, 'utf8'), 'route=SKIPPED\nreason=server_unavailable\n');
 });
 
 test('niyam-cli announces approval lifecycle for pending remote commands', async () => {
@@ -466,6 +544,45 @@ test('niyam-cli announces approval lifecycle for pending remote commands', async
     assert.match(dispatch.stderr, /pending approval/);
     assert.match(dispatch.stderr, /approved/);
     assert.match(dispatch.stderr, /completed/);
+});
+
+test('audit API enriches legacy command entries with command line details', async () => {
+    const submission = await apiJson('/api/commands', {
+        method: 'POST',
+        token: 'dev-token',
+        body: {
+            command: 'git',
+            args: ['push', '--no-verify']
+        }
+    });
+    assert.equal(submission.status, 201);
+
+    const db = new Database(path.join(dataDir, 'niyam.db'));
+    db.prepare(`
+        INSERT INTO audit_log (id, event_type, entity_type, entity_id, actor, details, redaction_summary, redacted, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+        uuidv4(),
+        'legacy_command_event',
+        'command',
+        submission.json.id,
+        'system',
+        JSON.stringify({ exitCode: 0 }),
+        JSON.stringify({}),
+        0,
+        new Date().toISOString()
+    );
+    db.close();
+
+    const audit = await apiJson(`/api/audit?entityId=${submission.json.id}&limit=20`, {
+        method: 'GET',
+        cookie: adminCookie
+    });
+    assert.equal(audit.status, 200);
+    const legacyEntry = audit.json.entries.find(entry => entry.event_type === 'legacy_command_event');
+    assert.ok(legacyEntry, 'expected legacy audit entry');
+    assert.equal(legacyEntry.details.command, 'git');
+    assert.deepEqual(legacyEntry.details.args, ['push', '--no-verify']);
 });
 
 test('allowed-root checks accept equivalent path casing when the filesystem resolves it', () => {

@@ -133,11 +133,14 @@ async function loadPendingPreview() {
         
         container.innerHTML = `<div class="pending-preview-list">${
             data.commands.map(cmd => `
-            <div class="pending-preview-item" onclick="openApprovalModal('${cmd.id}', '${escapeHtml(cmd.command)}', '${cmd.risk_level}')">
+            <div class="pending-preview-item review-preview-btn"
+                data-id="${cmd.id}"
+                data-risk="${cmd.risk_level}"
+                data-command="${encodeURIComponent(buildCommandLineDisplay(cmd))}">
                 <div class="pending-preview-main">
                     <div class="pending-preview-head">
                         <span class="risk-badge ${cmd.risk_level.toLowerCase()}">${cmd.risk_level}</span>
-                        <code class="pending-preview-command">${escapeHtml(cmd.command)}</code>
+                        <code class="pending-preview-command">${escapeHtml(buildCommandLineDisplay(cmd))}</code>
                     </div>
                     <div class="pending-preview-meta">${cmd.requester} · ${timeAgo(cmd.created_at)} · ${cmd.approval_count}/${cmd.required_approvals} approvals</div>
                 </div>
@@ -147,6 +150,16 @@ async function loadPendingPreview() {
             </div>
         `).join('')
         }</div>`;
+
+        container.querySelectorAll('.review-preview-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                openApprovalModal(
+                    btn.dataset.id,
+                    decodeURIComponent(btn.dataset.command || ''),
+                    btn.dataset.risk
+                );
+            });
+        });
     } catch (e) {
         document.getElementById('pending-preview').innerHTML = renderEmptyState('Failed to load pending preview', 'blocked');
     }

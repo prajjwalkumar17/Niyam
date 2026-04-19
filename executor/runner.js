@@ -88,6 +88,8 @@ class CommandRunner {
             );
             
             logAudit(this.db, 'command_executed', 'command', commandId, 'system', {
+                command: cmd.command,
+                args: parseJson(cmd.args, []),
                 exitCode: result.exitCode,
                 outputLength: (result.stdout || '').length
             });
@@ -108,6 +110,7 @@ class CommandRunner {
                 this.broadcast('command_completed', {
                     id: commandId,
                     command: cmd.command,
+                    args: parseJson(cmd.args, []),
                     exitCode: result.exitCode,
                     output: result.stdout
                 });
@@ -150,6 +153,8 @@ class CommandRunner {
             );
             
             logAudit(this.db, 'command_failed', 'command', commandId, 'system', {
+                command: cmd.command,
+                args: parseJson(cmd.args, []),
                 error: error.message,
                 exitCode: error.exitCode || 1
             });
@@ -171,6 +176,7 @@ class CommandRunner {
                 this.broadcast('command_failed', {
                     id: commandId,
                     command: cmd.command,
+                    args: parseJson(cmd.args, []),
                     error: error.message
                 });
             }
@@ -305,7 +311,7 @@ class CommandRunner {
     checkTimeouts() {
         const now = new Date().toISOString();
         const timedOut = this.db.prepare(`
-            SELECT id FROM commands 
+            SELECT id, command, args FROM commands 
             WHERE status = 'pending' 
             AND timeout_at IS NOT NULL 
             AND timeout_at < ?
@@ -317,6 +323,8 @@ class CommandRunner {
             `).run(now, cmd.id);
             
             logAudit(this.db, 'command_timeout', 'command', cmd.id, 'system', {
+                command: cmd.command,
+                args: parseJson(cmd.args, []),
                 reason: 'Approval window expired'
             });
             

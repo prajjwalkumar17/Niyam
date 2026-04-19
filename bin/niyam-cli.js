@@ -38,6 +38,8 @@ async function main(argv) {
     const [command, subcommand, target] = parsed.positionals;
 
     switch (command) {
+        case 'setup':
+            return handleSetup(parsed);
         case 'install':
             return handleInstall(parsed);
         case 'shell':
@@ -48,6 +50,8 @@ async function main(argv) {
             return handleReportLocalResult(parsed);
         case 'status':
             return handleStatus();
+        case 'uninstall':
+            return handleUninstall(parsed);
         case 'disable':
             return handleDisable(parsed);
         case undefined:
@@ -70,6 +74,41 @@ async function handleInstall(parsed) {
     return 0;
 }
 
+async function handleSetup(parsed) {
+    const shell = normalizeShell(parsed.options.shell || inferShell());
+    const cliPath = fs.realpathSync(__filename);
+    const envFile = resolveEnvFile(parsed.options['env-file']);
+    const fileConfig = envFile ? loadSetupConfigFromEnvFile(envFile) : {};
+
+    const overrides = {
+        baseUrl: parsed.options['base-url'] || fileConfig.baseUrl,
+        requester: parsed.options.requester || fileConfig.requester,
+        agentToken: parsed.options['agent-token'] || fileConfig.agentToken
+    };
+
+    if (!overrides.baseUrl) {
+        throw new Error('Setup could not determine the base URL. Pass --base-url or add NIYAM_CLI_BASE_URL / NIYAM_PORT to the env file.');
+    }
+    if (!overrides.requester) {
+        throw new Error('Setup could not determine the requester. Pass --requester or add NIYAM_CLI_REQUESTER / NIYAM_AGENT_TOKENS to the env file.');
+    }
+    if (!overrides.agentToken) {
+        throw new Error('Setup could not determine the agent token. Pass --agent-token or add NIYAM_AGENT_TOKENS to the env file.');
+    }
+
+    const { configPath } = ensureCliConfig(overrides);
+    const rcPath = installShellSnippet(shell, cliPath);
+
+    console.log(`Configured Niyam CLI for ${shell}`);
+    if (envFile) {
+        console.log(`Env file: ${envFile}`);
+    }
+    console.log(`Config: ${configPath}`);
+    console.log(`Shell rc: ${rcPath}`);
+    console.log(`Next: open a new ${shell} terminal or run "source ${rcPath}"`);
+    return 0;
+}
+
 async function handleShell(subcommand, target) {
     if (subcommand !== 'init') {
         throw new Error('Expected "shell init <bash|zsh>"');
@@ -88,6 +127,7 @@ async function handleDispatch(parsed) {
     }
 
     const firstToken = parsed.options['first-token'] || (tokenizeCommand(rawCommand)[0] || '');
+    const workingDir = parsed.options['working-dir'] || process.cwd();
     if (shouldSkipCommand(rawCommand, firstToken, config.skipCommands)) {
         if (parsed.options.json) {
             process.stdout.write(`${JSON.stringify({ route: 'SKIPPED', reason: 'Command was skipped locally' }, null, 2)}\n`);
@@ -109,7 +149,7 @@ async function handleDispatch(parsed) {
     try {
         dispatch = await client.createCliDispatch({
             rawCommand,
-            workingDir: parsed.options['working-dir'] || process.cwd(),
+            workingDir,
             shell: parsed.options.shell || 'unknown',
             sessionId: parsed.options['session-id'] || null,
             firstToken,
@@ -119,10 +159,20 @@ async function handleDispatch(parsed) {
             metadata
         });
     } catch (error) {
+        if (error.isReachabilityError) {
+            if (parsed.options.json) {
+                process.stdout.write(`${JSON.stringify({ route: 'SKIPPED', reason: 'Niyam server unavailable' }, null, 2)}\n`);
+                return 0;
+            }
+
+            console.error('niyam-cli: server unavailable, running locally');
+            writeLocalOutput(parsed.options['local-output-file'], 'route=SKIPPED\nreason=server_unavailable\n');
+            return SKIPPED_EXIT_CODE;
+        }
+
         if (parsed.options.json) {
             throw error;
         }
-        console.error(`niyam-cli: failed to reach ${config.baseUrl}`);
         console.error(`niyam-cli: ${error.message}`);
         return CLI_ERROR_EXIT_CODE;
     }
@@ -213,6 +263,28 @@ async function handleDisable(parsed) {
         console.log(`${shell}: ${result.changed ? 'removed' : 'not installed'} (${result.rcPath})`);
     });
 
+    return 0;
+}
+
+async function handleUninstall(parsed) {
+    const shell = parsed.options.shell
+        ? normalizeShell(parsed.options.shell)
+        : inferShell();
+    const result = removeShellSnippet(shell);
+    console.log(`${shell}: ${result.changed ? 'removed' : 'not installed'} (${result.rcPath})`);
+
+    if (parsed.options['purge-config']) {
+        const { getConfigPath } = require('../cli/config');
+        const configPath = getConfigPath();
+        if (fs.existsSync(configPath)) {
+            fs.rmSync(configPath, { force: true });
+            console.log(`Config removed: ${configPath}`);
+        } else {
+            console.log(`Config not found: ${configPath}`);
+        }
+    }
+
+    console.log(`Next: open a new ${shell} terminal or run "source ${result.rcPath}"`);
     return 0;
 }
 
@@ -368,14 +440,92 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function inferShell() {
+    const detected = path.basename(process.env.SHELL || '').trim().toLowerCase();
+    return ['zsh', 'bash'].includes(detected) ? detected : 'zsh';
+}
+
+function resolveEnvFile(input) {
+    const candidates = [
+        input,
+        path.join(process.cwd(), '.env.local'),
+        path.join(process.cwd(), '.deploy', 'niyam.env')
+    ].filter(Boolean);
+
+    for (const candidate of candidates) {
+        const resolved = path.resolve(candidate);
+        if (fs.existsSync(resolved)) {
+            return resolved;
+        }
+    }
+
+    return null;
+}
+
+function loadSetupConfigFromEnvFile(envFile) {
+    const values = parseEnvFile(fs.readFileSync(envFile, 'utf8'));
+    const tokenMap = parseAgentTokenMap(values.NIYAM_AGENT_TOKENS);
+    const requester = values.NIYAM_CLI_REQUESTER || Object.keys(tokenMap)[0] || '';
+    const baseUrl = values.NIYAM_CLI_BASE_URL
+        || values.NIYAM_BASE_URL
+        || (values.NIYAM_PORT ? `http://127.0.0.1:${values.NIYAM_PORT}` : '');
+    const agentToken = values.NIYAM_AGENT_TOKEN || tokenMap[requester] || Object.values(tokenMap)[0] || '';
+
+    return {
+        baseUrl,
+        requester,
+        agentToken
+    };
+}
+
+function parseEnvFile(contents) {
+    const values = {};
+    for (const line of String(contents || '').split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) {
+            continue;
+        }
+
+        const match = trimmed.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+        if (!match) {
+            continue;
+        }
+
+        values[match[1]] = unquoteEnvValue(match[2].trim());
+    }
+    return values;
+}
+
+function unquoteEnvValue(value) {
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith('\'') && value.endsWith('\''))) {
+        return value.slice(1, -1);
+    }
+    return value;
+}
+
+function parseAgentTokenMap(rawValue) {
+    if (!rawValue) {
+        return {};
+    }
+
+    try {
+        const parsed = JSON.parse(rawValue);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch (error) {
+        return {};
+    }
+}
+
 function printUsage() {
     console.log(`niyam-cli ${version}
 
 Commands:
+  niyam-cli setup [--shell zsh|bash] [--env-file .env.local]
   niyam-cli install --shell zsh|bash
   niyam-cli shell init zsh|bash
   niyam-cli dispatch --command "ls public" [--json]
   niyam-cli report-local-result --dispatch-id <id> --exit-code <n> --duration-ms <n>
   niyam-cli status
+  niyam-cli uninstall [--shell zsh|bash] [--purge-config]
   niyam-cli disable [--shell zsh|bash]`);
 }

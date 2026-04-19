@@ -72,7 +72,7 @@ async function loadHistoryPage() {
                             <span class="status-badge ${cmd.status}">${cmd.status}</span>
                             ${cmd.redacted ? '<span class="status-badge rejected">Redacted</span>' : ''}
                         </div>
-                        <div class="command-stream-title"><code>${escapeHtml(formatHistoryCommandLine(cmd))}</code></div>
+                        <div class="command-stream-title"><code>${escapeHtml(buildCommandLineDisplay(cmd))}</code></div>
                         <div class="command-stream-subtitle">${escapeHtml(cmd.requester)} · ${timeAgo(cmd.created_at)} · ${cmd.approval_count}/${cmd.required_approvals} approvals</div>
                     </div>
                     <div class="command-stream-side">
@@ -105,7 +105,7 @@ async function showCommandDetail(commandId) {
         
         const detailHtml = `
             <div style="background:var(--bg-input);border:1px solid var(--border-color);border-radius:8px;padding:16px;margin-bottom:16px">
-                <div style="margin-bottom:8px"><strong>Command:</strong> <code style="color:var(--accent-cyan)">${escapeHtml(cmd.command)}</code></div>
+                <div style="margin-bottom:8px"><strong>Command:</strong> <code style="color:var(--accent-cyan)">${escapeHtml(buildCommandLineDisplay(cmd))}</code></div>
                 ${cmd.redacted ? '<div style="margin-bottom:8px"><span class="status-badge rejected">Redacted</span> <span class="text-sm text-muted">Sensitive values were removed before storage.</span></div>' : ''}
                 <div style="margin-bottom:8px"><strong>Risk:</strong> <span class="risk-badge ${cmd.risk_level.toLowerCase()}">${cmd.risk_level}</span></div>
                 <div style="margin-bottom:8px"><strong>Status:</strong> <span class="status-badge ${cmd.status}">${cmd.status}</span></div>
@@ -135,9 +135,4 @@ async function showCommandDetail(commandId) {
     } catch (e) {
         showNotification('Failed to load command detail', 'error');
     }
-}
-
-function formatHistoryCommandLine(cmd) {
-    const args = Array.isArray(cmd.args) ? cmd.args.filter(Boolean) : [];
-    return [cmd.command, ...args].join(' ').trim();
 }
