@@ -57,6 +57,9 @@ function renderAudit(container) {
                     <option value="rule_pack_installed">Rule Pack Installed</option>
                     <option value="rule_pack_upgrade_previewed">Rule Pack Upgrade Previewed</option>
                     <option value="rule_pack_upgraded">Rule Pack Upgraded</option>
+                    <option value="user_created">User Created</option>
+                    <option value="user_updated">User Updated</option>
+                    <option value="user_password_reset">User Password Reset</option>
                 </select>
                 <input type="text" class="form-input" id="audit-actor-filter" placeholder="Filter by actor">
                 <input type="date" class="form-input" id="audit-start-date" title="Start date">

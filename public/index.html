@@ -50,7 +50,7 @@
                 </a>
             </li>
             <li>
-                <a href="#dispatches" class="nav-link" data-page="dispatches">
+                <a href="#dispatches" class="nav-link" data-page="dispatches" data-admin-only="true">
                     <span class="nav-icon" aria-hidden="true">
                         <svg viewBox="0 0 24 24"><path d="M5 12h4l2-4 3 8 2-4h3M6 6h12M6 18h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </span>
@@ -58,7 +58,7 @@
                 </a>
             </li>
             <li>
-                <a href="#rules" class="nav-link" data-page="rules">
+                <a href="#rules" class="nav-link" data-page="rules" data-admin-only="true">
                     <span class="nav-icon" aria-hidden="true">
                         <svg viewBox="0 0 24 24"><path d="M9 4h6l1 2h3v14H5V6h3l1-2Zm0 6h6M9 12h6M9 16h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </span>
@@ -66,11 +66,19 @@
                 </a>
             </li>
             <li>
-                <a href="#audit" class="nav-link" data-page="audit">
+                <a href="#audit" class="nav-link" data-page="audit" data-admin-only="true">
                     <span class="nav-icon" aria-hidden="true">
                         <svg viewBox="0 0 24 24"><path d="M10.5 18a7.5 7.5 0 1 1 5.3-2.2L20 20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </span>
                     <span class="nav-text">Audit Log</span>
+                </a>
+            </li>
+            <li>
+                <a href="#users" class="nav-link" data-page="users" data-admin-only="true">
+                    <span class="nav-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24"><path d="M7 18a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm10-2a3 3 0 1 1 0-6 3 3 0 0 1 0 6ZM3 21a5.5 5.5 0 0 1 8 0m5.5-.5a4.5 4.5 0 0 1 4.5 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </span>
+                    <span class="nav-text">Users</span>
                 </a>
             </li>
         </ul>
@@ -104,7 +112,7 @@
                     </span>
                     Submit Command
                 </button>
-                <button class="btn btn-secondary has-tooltip tooltip-below tooltip-right" id="logout-btn" style="display:none" data-tooltip="End the current local admin session.">
+                <button class="btn btn-secondary has-tooltip tooltip-below tooltip-right" id="logout-btn" style="display:none" data-tooltip="End the current local session.">
                     Sign Out
                 </button>
             </div>
@@ -189,7 +197,7 @@
                     <img src="/assets/niyam-mark.svg" alt="Niyam" class="login-brand-mark">
                     <div>
                         <div class="login-brand-name">Niyam</div>
-                        <div class="login-brand-copy">Local operator access</div>
+                        <div class="login-brand-copy">Sign in with a local Niyam account</div>
                     </div>
                 </div>
             </div>
@@ -202,7 +210,7 @@
                     <label for="login-password">Password</label>
                     <input type="password" id="login-password" class="form-input" autocomplete="current-password">
                 </div>
-                <div class="text-sm text-muted" id="login-status">Dashboard access requires a local admin session.</div>
+                <div class="text-sm text-muted" id="login-status">Sign in with a local Niyam account to continue.</div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-primary" id="login-btn">Sign In</button>
@@ -218,5 +226,6 @@
     <script src="/js/pages/dispatches.js"></script>
     <script src="/js/pages/rules.js"></script>
     <script src="/js/pages/audit.js"></script>
+    <script src="/js/pages/users.js"></script>
 </body>
 </html>

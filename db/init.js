@@ -9,6 +9,7 @@ const { v4: uuidv4 } = require('uuid');
 
 const { config } = require('../config');
 const { runMigrations } = require('./migrations');
+const { createUsersService } = require('../services/users');
 
 const DB_PATH = config.DB_PATH;
 const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
@@ -34,6 +35,7 @@ function initializeDatabase() {
     
     // Seed initial data
     seedRules(db);
+    seedLocalUsers(db);
     seedApprovers(db);
     
     db.close();
@@ -186,6 +188,7 @@ function seedRules(db) {
 
 function seedApprovers(db) {
     const now = new Date().toISOString();
+    const usersService = createUsersService(db);
     
     const defaultApprovers = [
         {
@@ -194,22 +197,6 @@ function seedApprovers(db) {
             type: 'agent',
             identifier: Object.keys(config.AGENT_TOKENS)[0] || 'niyam-agent',
             can_approve_high: 1,
-            can_approve_medium: 1
-        },
-        {
-            id: uuidv4(),
-            name: 'Dashboard Admin',
-            type: 'role',
-            identifier: config.ADMIN_IDENTIFIER,
-            can_approve_high: 1,
-            can_approve_medium: 1
-        },
-        {
-            id: uuidv4(),
-            name: 'Dashboard User',
-            type: 'role',
-            identifier: 'user',
-            can_approve_high: 0,
             can_approve_medium: 1
         }
     ];
@@ -228,6 +215,12 @@ function seedApprovers(db) {
     }
     
     console.log(`Seeded ${defaultApprovers.length} default approvers`);
+    usersService.syncAllLocalUserApprovers();
+}
+
+function seedLocalUsers(db) {
+    const usersService = createUsersService(db);
+    usersService.ensureBootstrapAdminUser();
 }
 
 // Run if called directly

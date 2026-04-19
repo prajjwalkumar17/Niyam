@@ -19,6 +19,7 @@ const { createRulePacksRouter } = require('./api/rule-packs');
 const { createPolicyRouter } = require('./api/policy');
 const { createAuditRouter } = require('./api/audit');
 const { createCliRouter } = require('./api/cli');
+const { createUsersRouter } = require('./api/users');
 const { broadcastManager, broadcast } = require('./ws/broadcast');
 const ExecutionGuard = require('./executor/guard');
 const { createRequestLogger, logger, metrics } = require('./observability');
@@ -144,6 +145,7 @@ app.use('/api/cli', auth.requireAuth, createCliRouter(db, broadcast, auth, { onA
 app.use('/api/rules', auth.requireAdmin, createRulesRouter(db, broadcast));
 app.use('/api/rule-packs', auth.requireAdmin, createRulePacksRouter(db));
 app.use('/api/audit', auth.requireAdmin, createAuditRouter(db));
+app.use('/api/users', auth.requireAdmin, createUsersRouter(db));
 
 // Serve static dashboard
 app.use(express.static(path.join(__dirname, 'public')));

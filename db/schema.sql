@@ -88,15 +88,31 @@ CREATE TABLE IF NOT EXISTS approvers (
     metadata TEXT
 );
 
+-- Local users table: dashboard accounts managed inside Niyam
+CREATE TABLE IF NOT EXISTS local_users (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE,
+    display_name TEXT,
+    password_hash TEXT NOT NULL,
+    enabled INTEGER DEFAULT 1,
+    roles TEXT NOT NULL,
+    last_login_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    metadata TEXT
+);
+
 -- Sessions table: persistent dashboard sessions
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
+    user_id TEXT,
     token_hash TEXT NOT NULL UNIQUE,
     identifier TEXT NOT NULL,
     roles TEXT NOT NULL,          -- JSON array
     created_at TEXT NOT NULL,
     expires_at TEXT NOT NULL,
-    last_seen_at TEXT NOT NULL
+    last_seen_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES local_users(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS cli_dispatches (
@@ -144,6 +160,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at);
 CREATE INDEX IF NOT EXISTS idx_rules_enabled ON rules(enabled);
 CREATE INDEX IF NOT EXISTS idx_rules_priority ON rules(priority DESC);
 CREATE INDEX IF NOT EXISTS idx_rules_managed_pack ON rules(managed_by_pack, managed_by_pack_rule_id);
+CREATE INDEX IF NOT EXISTS idx_local_users_enabled ON local_users(enabled);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
 CREATE INDEX IF NOT EXISTS idx_cli_dispatches_route ON cli_dispatches(route);
 CREATE INDEX IF NOT EXISTS idx_cli_dispatches_status ON cli_dispatches(status);

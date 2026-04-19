@@ -73,7 +73,7 @@ async function loadHistoryPage() {
                             ${cmd.redacted ? '<span class="status-badge rejected">Redacted</span>' : ''}
                         </div>
                         <div class="command-stream-title"><code>${escapeHtml(buildCommandLineDisplay(cmd))}</code></div>
-                        <div class="command-stream-subtitle">${escapeHtml(cmd.requester)} · ${timeAgo(cmd.created_at)} · ${cmd.approval_count}/${cmd.required_approvals} approvals</div>
+                        <div class="command-stream-subtitle">${escapeHtml(cmd.requester)} · ${timeAgo(cmd.created_at)} · ${escapeHtml(formatApprovalProgress(cmd))}</div>
                     </div>
                     <div class="command-stream-side">
                         <div class="history-exit-code">${cmd.exit_code !== null ? `Exit ${cmd.exit_code}` : 'No exit code'}</div>
@@ -81,7 +81,8 @@ async function loadHistoryPage() {
                 </div>
                 <div class="command-stream-meta-row">
                     <span class="command-stream-meta-pill">Requester · ${escapeHtml(cmd.requester)}</span>
-                    <span class="command-stream-meta-pill">Approvals · ${cmd.approval_count}/${cmd.required_approvals}</span>
+                    <span class="command-stream-meta-pill">Approvals · ${escapeHtml(formatApprovalProgress(cmd))}</span>
+                    <span class="command-stream-meta-pill">Approved By · ${escapeHtml((cmd.approvedBy || []).join(', ') || 'No approvals yet')}</span>
                     <span class="command-stream-meta-pill">${cmd.executed_at ? `Executed · ${formatTime(cmd.executed_at)}` : `Created · ${formatTime(cmd.created_at)}`}</span>
                     ${cmd.execution_mode ? `<span class="command-stream-meta-pill">Mode · ${escapeHtml(cmd.execution_mode)}</span>` : ''}
                 </div>

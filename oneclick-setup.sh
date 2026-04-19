@@ -298,7 +298,16 @@ print_cli_wrapper_instructions() {
     printf '  npm run cli:install\n'
     printf '  source ~/.zshrc\n'
     printf '\n'
-    printf 'To remove the CLI wrapper later:\n'
+    printf 'Quick toggle commands after install:\n'
+    printf '  niyam-off\n'
+    printf '  niyam-on\n'
+    printf '\n'
+    printf 'To fully uninstall the CLI wrapper later:\n'
+    printf '  cd %s\n' "$ROOT_DIR"
+    printf '  npm run cli:remove\n'
+    printf '  source ~/.zshrc\n'
+    printf '\n'
+    printf 'To remove the CLI wrapper from the current shell only:\n'
     printf '  niyam-off\n'
 }
 
@@ -555,7 +564,7 @@ configure_local() {
     DATA_DIR=$(prompt_with_default "Local data directory" "$ROOT_DIR/.local/niyam")
     DB_PATH="$DATA_DIR/niyam.db"
     ALLOWED_ORIGINS=$(prompt_with_default "Allowed browser origins" "http://localhost:$PORT")
-    EXEC_ALLOWED_ROOTS=$(prompt_with_default "Execution allowed roots" "$ROOT_DIR")
+    EXEC_ALLOWED_ROOTS=$(prompt_with_default "Execution allowed roots" "$HOME")
     EXEC_DEFAULT_MODE=$(normalize_exec_mode "$(prompt_with_default "Default execution mode (DIRECT or WRAPPER)" "DIRECT")")
     if [[ "$EXEC_DEFAULT_MODE" == "WRAPPER" ]]; then
         EXEC_WRAPPER=$(prompt_with_default "Wrapper JSON array" '["/usr/bin/env"]')

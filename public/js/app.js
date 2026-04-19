@@ -37,6 +37,9 @@ const ICONS = {
     package: '<svg viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Zm0 0v9m8-4.5-8 4.5-8-4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 };
 
+const ALL_PAGES = ['dashboard', 'pending', 'history', 'dispatches', 'rules', 'audit', 'users'];
+const DEFAULT_USER_PAGES = ['dashboard', 'pending', 'history'];
+
 function renderUiIcon(name, className = '') {
     const svg = ICONS[name] || ICONS.activity;
     return `<span class="${className}">${svg}</span>`;
@@ -68,7 +71,7 @@ async function bootstrapApp() {
 
     const restored = await restoreSession();
     if (!restored) {
-        enterUnauthenticatedState('Dashboard access requires a local admin session.');
+        enterUnauthenticatedState('Sign in with a local Niyam account to continue.');
     }
 }
 
@@ -114,6 +117,7 @@ function enterAuthenticatedState(principal) {
     state.principal = principal;
     hideLoginOverlay();
     updateSessionUi();
+    updateNavigationForPrincipal();
 
     if (!state.initialized) {
         initNavigation();
@@ -122,13 +126,14 @@ function enterAuthenticatedState(principal) {
 
         const pageFromHash = (window.location.hash || '').replace('#', '');
         const savedPage = localStorage.getItem('niyam.currentPage');
-        const initialPage = ['dashboard', 'pending', 'history', 'dispatches', 'rules', 'audit'].includes(pageFromHash)
+        const allowedPages = getAllowedPages(principal);
+        const initialPage = allowedPages.includes(pageFromHash)
             ? pageFromHash
-            : (['dashboard', 'pending', 'history', 'dispatches', 'rules', 'audit'].includes(savedPage) ? savedPage : 'dashboard');
+            : (allowedPages.includes(savedPage) ? savedPage : 'dashboard');
 
         window.addEventListener('hashchange', () => {
             const page = (window.location.hash || '').replace('#', '');
-            if (state.principal && ['dashboard', 'pending', 'history', 'dispatches', 'rules', 'audit'].includes(page) && page !== state.currentPage) {
+            if (state.principal && getAllowedPages(state.principal).includes(page) && page !== state.currentPage) {
                 navigateTo(page);
             }
         });
@@ -148,6 +153,7 @@ function enterAuthenticatedState(principal) {
 function enterUnauthenticatedState(message) {
     state.principal = null;
     updateSessionUi();
+    updateNavigationForPrincipal();
     closeApprovalModal();
     closeModal();
     stopRealtime();
@@ -166,20 +172,20 @@ function updateSessionUi() {
         return;
     }
 
-    pill.textContent = `${state.principal.identifier} · ${state.principal.type}`;
+    pill.textContent = describePrincipal(state.principal);
     logoutBtn.style.display = 'inline-flex';
     submitBtn.disabled = false;
 }
 
 function showLoginOverlay(message) {
     document.getElementById('login-overlay').style.display = 'flex';
-    setLoginStatus(message || 'Dashboard access requires a local admin session.');
+    setLoginStatus(message || 'Sign in with a local Niyam account to continue.');
     document.getElementById('login-password').focus();
 }
 
 function hideLoginOverlay() {
     document.getElementById('login-overlay').style.display = 'none';
-    setLoginStatus('Dashboard access requires a local admin session.');
+    setLoginStatus('Sign in with a local Niyam account to continue.');
     document.getElementById('login-password').value = '';
 }
 
@@ -239,7 +245,7 @@ async function apiFetch(path, options = {}) {
 }
 
 function navigateTo(page) {
-    if (!['dashboard', 'pending', 'history', 'dispatches', 'rules', 'audit'].includes(page)) {
+    if (!getAllowedPages(state.principal).includes(page)) {
         page = 'dashboard';
     }
 
@@ -263,7 +269,8 @@ function navigateTo(page) {
         history: 'Command History',
         dispatches: 'Shell Dispatches',
         rules: 'Policy Rules',
-        audit: 'Audit Log'
+        audit: 'Audit Log',
+        users: 'Users'
     };
     document.getElementById('page-title').textContent = titles[page] || page;
     
@@ -278,6 +285,7 @@ function navigateTo(page) {
         case 'dispatches': renderDispatches(container); break;
         case 'rules': renderRules(container); break;
         case 'audit': renderAudit(container); break;
+        case 'users': renderUsers(container); break;
     }
     
     // Start auto-refresh
@@ -356,6 +364,7 @@ function silentlyRefreshCurrentPage() {
         case 'dispatches': renderDispatches(container); break;
         case 'rules': renderRules(container); break;
         case 'audit': renderAudit(container); break;
+        case 'users': renderUsers(container); break;
     }
     updatePendingBadge();
 }
@@ -811,12 +820,15 @@ let currentApprovalCommandId = null;
 function openApprovalModal(commandId, command, riskLevel) {
     currentApprovalCommandId = commandId;
     document.getElementById('approval-modal').style.display = 'flex';
-    document.getElementById('approval-command-detail').textContent = command;
+    document.getElementById('approval-command-detail').innerHTML = '<div class="text-sm text-muted">Loading command context...</div>';
     document.getElementById('approval-rationale').value = '';
     
     const requiresRationale = riskLevel === 'HIGH';
     document.getElementById('approval-modal-title').textContent =
         requiresRationale ? 'Approve Command (Rationale Required)' : 'Approve Command';
+    document.getElementById('approve-btn').disabled = false;
+    document.getElementById('reject-btn').disabled = false;
+    loadApprovalContext(commandId, command, riskLevel);
 }
 
 function closeApprovalModal() {
@@ -842,10 +854,10 @@ async function processApproval(decision) {
         const result = await response.json();
         
         if (response.ok) {
-            showNotification(
-                decision === 'approve' ? 'Command approved' : 'Command rejected',
-                decision === 'approve' ? 'success' : 'warning'
-            );
+            const message = decision === 'approve'
+                ? (result.fullyApproved ? 'Command approved' : 'Approval recorded, still pending')
+                : 'Command rejected';
+            showNotification(message, decision === 'approve' ? 'success' : 'warning');
             closeApprovalModal();
             navigateTo(state.currentPage);
         } else {
@@ -897,4 +909,125 @@ function buildCommandLineDisplay(record) {
         : [];
 
     return [command, ...args].filter(Boolean).join(' ').trim();
+}
+
+async function loadApprovalContext(commandId, fallbackCommand, fallbackRiskLevel) {
+    try {
+        const response = await apiFetch(`/commands/${commandId}`);
+        const command = await response.json();
+        if (!response.ok) {
+            throw new Error(command.error || 'Failed to load command');
+        }
+
+        renderApprovalContext(command);
+    } catch (error) {
+        document.getElementById('approval-command-detail').innerHTML = `
+            <div class="command-detail">
+                <div><strong>Command:</strong> <code>${escapeHtml(fallbackCommand || '')}</code></div>
+                <div><strong>Risk:</strong> ${escapeHtml(fallbackRiskLevel || 'UNKNOWN')}</div>
+                <div class="text-sm text-muted" style="margin-top:8px">${escapeHtml(error.message || 'Failed to load approval context')}</div>
+            </div>
+        `;
+    }
+}
+
+function renderApprovalContext(command) {
+    const detail = document.getElementById('approval-command-detail');
+    const blockReason = getApprovalBlockReason(command);
+    const approvedBy = Array.isArray(command.approvedBy) ? command.approvedBy : [];
+    detail.innerHTML = `
+        <div class="command-detail">
+            <div style="margin-bottom:10px"><strong>Command:</strong> <code>${escapeHtml(buildCommandLineDisplay(command))}</code></div>
+            <div style="margin-bottom:8px"><strong>Requester:</strong> ${escapeHtml(command.requester)}</div>
+            <div style="margin-bottom:8px"><strong>Risk:</strong> <span class="risk-badge ${String(command.risk_level || 'medium').toLowerCase()}">${escapeHtml(command.risk_level || 'MEDIUM')}</span></div>
+            <div style="margin-bottom:8px"><strong>Progress:</strong> ${escapeHtml(formatApprovalProgress(command))}</div>
+            <div style="margin-bottom:8px"><strong>Approved by:</strong> ${approvedBy.length > 0 ? escapeHtml(approvedBy.join(', ')) : 'No approvals yet'}</div>
+            ${command.rejectedBy ? `<div style="margin-bottom:8px"><strong>Rejected by:</strong> ${escapeHtml(command.rejectedBy)}</div>` : ''}
+            ${command.timeout_at ? `<div style="margin-bottom:8px"><strong>Approval window:</strong> ${escapeHtml(formatTimeout(command.timeout_at))}</div>` : ''}
+            ${command.approvalProgress && !command.approvalProgress.twoPersonSatisfied ? '<div class="text-sm text-muted" style="margin-top:10px">Waiting for one more distinct approver to satisfy the two-person rule.</div>' : ''}
+            ${blockReason ? `<div class="text-sm text-muted" style="margin-top:10px;color:var(--accent-red)">${escapeHtml(blockReason)}</div>` : ''}
+        </div>
+    `;
+
+    document.getElementById('approve-btn').disabled = Boolean(blockReason);
+    document.getElementById('reject-btn').disabled = Boolean(blockReason);
+}
+
+function updateNavigationForPrincipal() {
+    document.querySelectorAll('.nav-link').forEach(link => {
+        const adminOnly = link.dataset.adminOnly === 'true';
+        link.style.display = !adminOnly || isAdminPrincipal(state.principal) ? '' : 'none';
+    });
+}
+
+function getAllowedPages(principal) {
+    if (!principal) {
+        return ['dashboard'];
+    }
+
+    return isAdminPrincipal(principal) ? [...ALL_PAGES] : [...DEFAULT_USER_PAGES];
+}
+
+function isAdminPrincipal(principal) {
+    return Boolean(principal && Array.isArray(principal.roles) && principal.roles.includes('admin'));
+}
+
+function describePrincipal(principal) {
+    if (!principal) {
+        return 'Not signed in';
+    }
+
+    const label = principal.displayName || principal.identifier;
+    const roles = Array.isArray(principal.roles) ? principal.roles : [];
+    const context = roles.includes('admin')
+        ? 'admin'
+        : (roles.includes('approver') ? 'approver' : principal.type);
+    return `${label} · ${context}`;
+}
+
+function getApprovalBlockReason(command) {
+    if (!state.principal) {
+        return 'Sign in to review this command.';
+    }
+
+    if (command.status && command.status !== 'pending') {
+        return `Command is ${command.status}, not pending.`;
+    }
+
+    if (command.requester === state.principal.identifier) {
+        return 'Requester cannot approve their own command.';
+    }
+
+    const capabilities = state.principal.approvalCapabilities || {};
+    if (command.risk_level === 'HIGH' && !capabilities.canApproveHigh) {
+        return 'You are not authorized for HIGH risk.';
+    }
+
+    if (command.risk_level === 'MEDIUM' && !(capabilities.canApproveMedium || capabilities.canApproveHigh)) {
+        return 'You are not authorized for MEDIUM risk.';
+    }
+
+    if (Array.isArray(command.approvedBy) && command.approvedBy.includes(state.principal.identifier)) {
+        return 'You have already approved this command.';
+    }
+
+    if (command.rejectedBy === state.principal.identifier) {
+        return 'You have already reviewed this command.';
+    }
+
+    return '';
+}
+
+function formatApprovalProgress(command) {
+    const progress = command.approvalProgress || {
+        count: Number(command.approval_count || 0),
+        required: Number(command.required_approvals || 0),
+        remaining: Math.max(0, Number(command.required_approvals || 0) - Number(command.approval_count || 0)),
+        twoPersonSatisfied: command.risk_level !== 'HIGH'
+    };
+    const base = `${progress.count}/${progress.required} approvals`;
+    if (command.risk_level === 'HIGH' && !progress.twoPersonSatisfied) {
+        return `${base} · waiting for distinct approver`;
+    }
+    return progress.remaining > 0 ? `${base} · ${progress.remaining} remaining` : `${base} · ready`;
 }

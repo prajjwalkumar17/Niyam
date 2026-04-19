@@ -299,8 +299,197 @@ test('versioned migrations are recorded in schema_migrations', async () => {
     assert.deepEqual(migrations, [
         '001_execution_mode_and_sessions',
         '002_redaction_and_pack_metadata',
-        '003_cli_dispatches'
+        '003_cli_dispatches',
+        '004_local_users'
     ]);
+});
+
+test('local users can be managed via admin APIs and disabled sessions are rejected', async () => {
+    const adminUsers = await apiJson('/api/users', {
+        method: 'GET',
+        cookie: adminCookie
+    });
+    assert.equal(adminUsers.status, 200);
+    assert.ok(adminUsers.json.users.some(user => user.username === 'admin' && user.roles.includes('admin')));
+
+    const create = await apiJson('/api/users', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            username: 'approver-one',
+            displayName: 'Approver One',
+            password: 'pass-one',
+            enabled: true,
+            roles: [],
+            approvalCapabilities: {
+                canApproveMedium: true,
+                canApproveHigh: true
+            }
+        }
+    });
+    assert.equal(create.status, 201);
+    assert.equal(create.json.username, 'approver-one');
+    assert.equal(create.json.approvalCapabilities.canApproveHigh, true);
+
+    const duplicate = await apiJson('/api/users', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            username: 'approver-one',
+            displayName: 'Duplicate',
+            password: 'pass-two',
+            enabled: true,
+            roles: [],
+            approvalCapabilities: {
+                canApproveMedium: false,
+                canApproveHigh: false
+            }
+        }
+    });
+    assert.equal(duplicate.status, 409);
+
+    const approverLogin = await loginAsLocalUser('approver-one', 'pass-one');
+    assert.equal(approverLogin.status, 200);
+    assert.equal(approverLogin.json.principal.identifier, 'approver-one');
+    assert.equal(approverLogin.json.principal.approvalCapabilities.canApproveHigh, true);
+
+    const nonAdminUsers = await apiJson('/api/users', {
+        method: 'GET',
+        cookie: approverLogin.cookie
+    });
+    assert.equal(nonAdminUsers.status, 403);
+
+    const resetPassword = await apiJson(`/api/users/${create.json.id}/password`, {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            password: 'pass-two'
+        }
+    });
+    assert.equal(resetPassword.status, 200);
+
+    const oldPasswordLogin = await loginAsLocalUser('approver-one', 'pass-one');
+    assert.equal(oldPasswordLogin.status, 401);
+
+    const disable = await apiJson(`/api/users/${create.json.id}`, {
+        method: 'PUT',
+        cookie: adminCookie,
+        body: {
+            enabled: false
+        }
+    });
+    assert.equal(disable.status, 200);
+    assert.equal(disable.json.enabled, false);
+
+    const disabledLogin = await loginAsLocalUser('approver-one', 'pass-two');
+    assert.equal(disabledLogin.status, 403);
+
+    const disabledSessionCheck = await fetch(`${baseUrl}/api/auth/me`, {
+        headers: { Cookie: approverLogin.cookie }
+    });
+    assert.equal(disabledSessionCheck.status, 401);
+
+    const currentUsers = await apiJson('/api/users', {
+        method: 'GET',
+        cookie: adminCookie
+    });
+    const bootstrapAdmin = currentUsers.json.users.find(user => user.username === 'admin');
+    assert.ok(bootstrapAdmin);
+
+    const lastAdminDisable = await apiJson(`/api/users/${bootstrapAdmin.id}`, {
+        method: 'PUT',
+        cookie: adminCookie,
+        body: {
+            enabled: false
+        }
+    });
+    assert.equal(lastAdminDisable.status, 400);
+});
+
+test('high-risk commands can be approved by two distinct dashboard users', async () => {
+    const createUser = async (username, password) => apiJson('/api/users', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            username,
+            displayName: username,
+            password,
+            enabled: true,
+            roles: [],
+            approvalCapabilities: {
+                canApproveMedium: true,
+                canApproveHigh: true
+            }
+        }
+    });
+
+    const approverA = await createUser('approver-high-a', 'high-pass-a');
+    const approverB = await createUser('approver-high-b', 'high-pass-b');
+    assert.equal(approverA.status, 201);
+    assert.equal(approverB.status, 201);
+
+    const approverALogin = await loginAsLocalUser('approver-high-a', 'high-pass-a');
+    const approverBLogin = await loginAsLocalUser('approver-high-b', 'high-pass-b');
+    assert.equal(approverALogin.status, 200);
+    assert.equal(approverBLogin.status, 200);
+
+    const highRule = await apiJson('/api/rules', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            name: 'Dashboard Dual Approval Echo',
+            description: 'Force a harmless command into HIGH risk for dual-dashboard approval',
+            rule_type: 'pattern',
+            pattern: 'echo\\s+dual-dashboard-approval',
+            risk_level: 'HIGH',
+            priority: 650
+        }
+    });
+    assert.equal(highRule.status, 201);
+
+    const submission = await apiJson('/api/commands', {
+        method: 'POST',
+        token: 'dev-token',
+        body: {
+            command: 'echo',
+            args: ['dual-dashboard-approval']
+        }
+    });
+    assert.equal(submission.status, 201);
+    assert.equal(submission.json.status, 'pending');
+
+    const firstApproval = await apiJson(`/api/approvals/${submission.json.id}/approve`, {
+        method: 'POST',
+        cookie: approverALogin.cookie,
+        body: {
+            rationale: 'first dashboard approver'
+        }
+    });
+    assert.equal(firstApproval.status, 200);
+    assert.equal(firstApproval.json.fullyApproved, false);
+
+    const afterFirstApproval = await apiJson(`/api/commands/${submission.json.id}`, {
+        method: 'GET',
+        cookie: adminCookie
+    });
+    assert.deepEqual(afterFirstApproval.json.approvedBy, ['approver-high-a']);
+    assert.equal(afterFirstApproval.json.approvalProgress.twoPersonSatisfied, false);
+
+    const secondApproval = await apiJson(`/api/approvals/${submission.json.id}/approve`, {
+        method: 'POST',
+        cookie: approverBLogin.cookie,
+        body: {
+            rationale: 'second dashboard approver'
+        }
+    });
+    assert.equal(secondApproval.status, 200);
+    assert.equal(secondApproval.json.fullyApproved, true);
+
+    const final = await waitForCommand(submission.json.id);
+    assert.equal(final.status, 'completed');
+    assert.deepEqual(final.approvedBy, ['approver-high-a', 'approver-high-b']);
+    assert.equal(final.approvalProgress.twoPersonSatisfied, true);
+    assert.equal(final.output.includes('dual-dashboard-approval'), true);
 });
 
 test('niyam-cli install, status, and disable manage shell integration in a temp home', async () => {
@@ -325,8 +514,10 @@ test('niyam-cli install, status, and disable manage shell integration in a temp 
     const renderedZsh = renderShellInit('zsh', path.join(ROOT_DIR, 'bin', 'niyam-cli.js'));
     assert.ok(fs.existsSync(rcPath));
     assert.ok(fs.existsSync(configPath));
+    assert.ok(fs.readFileSync(rcPath, 'utf8').includes('# >>> niyam-bootstrap >>>'));
     assert.ok(fs.readFileSync(rcPath, 'utf8').includes('# >>> niyam >>>'));
     assert.ok(renderedZsh.includes('__niyam_zsh_begin_command'));
+    assert.ok(renderedZsh.includes('niyam-on()'));
     assert.ok(renderedZsh.includes('niyam-off()'));
     assert.ok(renderedZsh.includes('zle reset-prompt\n  print'));
 
@@ -365,7 +556,10 @@ test('niyam-cli install, status, and disable manage shell integration in a temp 
 
     const disable = await runNodeScript('bin/niyam-cli.js', cliEnv, ['disable', '--shell', 'zsh']);
     assert.equal(disable.status, 0, disable.stderr);
-    assert.equal(fs.readFileSync(rcPath, 'utf8').includes('# >>> niyam >>>'), false);
+    const rcAfterDisable = fs.readFileSync(rcPath, 'utf8');
+    assert.equal(rcAfterDisable.includes('# >>> niyam >>>'), false);
+    assert.equal(rcAfterDisable.includes('# >>> niyam-bootstrap >>>'), true);
+    assert.equal(rcAfterDisable.includes('niyam-on()'), true);
 });
 
 test('niyam-cli setup and uninstall provide one-command wrapper lifecycle', async () => {
@@ -407,7 +601,9 @@ test('niyam-cli setup and uninstall provide one-command wrapper lifecycle', asyn
 
     const uninstall = await runNodeScript('bin/niyam-cli.js', cliEnv, ['uninstall', '--purge-config']);
     assert.equal(uninstall.status, 0, uninstall.stderr);
-    assert.equal(fs.readFileSync(rcPath, 'utf8').includes('# >>> niyam >>>'), false);
+    const rcAfterUninstall = fs.readFileSync(rcPath, 'utf8');
+    assert.equal(rcAfterUninstall.includes('# >>> niyam >>>'), false);
+    assert.equal(rcAfterUninstall.includes('# >>> niyam-bootstrap >>>'), false);
     assert.equal(fs.existsSync(configPath), false);
 });
 
@@ -627,7 +823,7 @@ test('backup and restore scripts preserve the database state', async () => {
     restoredDb.close();
 
     assert.ok(commandCount >= 1);
-    assert.equal(migrationCount, 3);
+    assert.equal(migrationCount, 4);
 });
 
 test('exec key rotation preserves delayed execution payloads', async () => {
@@ -776,18 +972,28 @@ async function waitForHealth() {
 }
 
 async function loginAsAdmin() {
+    const result = await loginAsLocalUser('admin', 'admin');
+    assert.equal(result.status, 200);
+    assert.ok(result.cookie, 'expected session cookie');
+    return result.cookie;
+}
+
+async function loginAsLocalUser(username, password) {
     const response = await fetch(`${baseUrl}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            username: 'admin',
-            password: 'admin'
+            username,
+            password
         })
     });
-    assert.equal(response.status, 200);
     const setCookie = response.headers.get('set-cookie');
-    assert.ok(setCookie, 'expected session cookie');
-    return setCookie.split(';')[0];
+    const json = await response.json();
+    return {
+        status: response.status,
+        json,
+        cookie: setCookie ? setCookie.split(';')[0] : ''
+    };
 }
 
 async function apiJson(endpoint, options = {}) {

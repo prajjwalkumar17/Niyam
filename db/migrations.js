@@ -94,6 +94,34 @@ const MIGRATIONS = [
             ensureIndex(db, 'idx_cli_dispatches_command_id', 'CREATE INDEX idx_cli_dispatches_command_id ON cli_dispatches(command_id)');
             ensureIndex(db, 'idx_cli_dispatches_created_at', 'CREATE INDEX idx_cli_dispatches_created_at ON cli_dispatches(created_at)');
         }
+    },
+    {
+        id: '004_local_users',
+        description: 'Add managed local dashboard users and bind sessions to user ids',
+        up(db) {
+            if (!hasTable(db, 'local_users')) {
+                db.exec(`
+                    CREATE TABLE local_users (
+                        id TEXT PRIMARY KEY,
+                        username TEXT NOT NULL UNIQUE,
+                        display_name TEXT,
+                        password_hash TEXT NOT NULL,
+                        enabled INTEGER DEFAULT 1,
+                        roles TEXT NOT NULL,
+                        last_login_at TEXT,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        metadata TEXT
+                    );
+                `);
+            }
+
+            ensureColumn(db, 'sessions', 'user_id', 'ALTER TABLE sessions ADD COLUMN user_id TEXT');
+            db.exec(`DELETE FROM sessions`);
+            db.exec(`DELETE FROM approvers WHERE identifier = 'user'`);
+
+            ensureIndex(db, 'idx_local_users_enabled', 'CREATE INDEX idx_local_users_enabled ON local_users(enabled)');
+        }
     }
 ];
 

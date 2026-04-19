@@ -325,6 +325,117 @@ function validateRulePayload(body, options = {}) {
     };
 }
 
+function validateUserPayload(body, options = {}) {
+    const value = isPlainObject(body) ? body : {};
+    const errors = [];
+    const normalized = {};
+    const partial = Boolean(options.partial);
+
+    if (!partial) {
+        validateOptionalString(value, 'username', normalized, errors, { maxLength: 64, required: true });
+        if (normalized.username && !/^[A-Za-z0-9._-]+$/.test(normalized.username)) {
+            errors.push('Username may only contain letters, numbers, dots, underscores, and dashes');
+        }
+    }
+
+    if (!partial) {
+        if (typeof value.password !== 'string' || !value.password) {
+            errors.push('Password is required');
+        } else if (value.password.length > 4096) {
+            errors.push('Password is too long');
+        } else {
+            normalized.password = value.password;
+        }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(value, 'displayName')) {
+        if (value.displayName !== null && typeof value.displayName !== 'string') {
+            errors.push('Display name must be a string or null');
+        } else if (typeof value.displayName === 'string' && value.displayName.length > 128) {
+            errors.push('Display name is too long');
+        } else {
+            normalized.displayName = typeof value.displayName === 'string' ? value.displayName.trim() : null;
+        }
+    } else if (!partial) {
+        normalized.displayName = null;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(value, 'enabled')) {
+        const enabled = normalizeBooleanLike(value.enabled);
+        if (enabled === null) {
+            errors.push('Enabled must be a boolean or 0/1');
+        } else {
+            normalized.enabled = enabled;
+        }
+    } else if (!partial) {
+        normalized.enabled = true;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(value, 'roles')) {
+        if (!Array.isArray(value.roles) || !value.roles.every(role => typeof role === 'string')) {
+            errors.push('Roles must be an array of strings');
+        } else if (!value.roles.every(role => ['admin'].includes(role))) {
+            errors.push('Roles may only contain admin');
+        } else {
+            normalized.roles = value.roles.map(role => role.trim()).filter(Boolean);
+        }
+    } else if (!partial) {
+        normalized.roles = [];
+    }
+
+    if (Object.prototype.hasOwnProperty.call(value, 'approvalCapabilities')) {
+        if (!isPlainObject(value.approvalCapabilities)) {
+            errors.push('Approval capabilities must be an object');
+        } else {
+            const canApproveMedium = normalizeBooleanLike(value.approvalCapabilities.canApproveMedium);
+            const canApproveHigh = normalizeBooleanLike(value.approvalCapabilities.canApproveHigh);
+            if (canApproveMedium === null) {
+                errors.push('Approval capabilities.canApproveMedium must be a boolean or 0/1');
+            }
+            if (canApproveHigh === null) {
+                errors.push('Approval capabilities.canApproveHigh must be a boolean or 0/1');
+            }
+            if (canApproveMedium !== null && canApproveHigh !== null) {
+                normalized.approvalCapabilities = {
+                    canApproveMedium,
+                    canApproveHigh
+                };
+            }
+        }
+    } else if (!partial) {
+        normalized.approvalCapabilities = {
+            canApproveMedium: false,
+            canApproveHigh: false
+        };
+    }
+
+    return {
+        valid: errors.length === 0,
+        errors,
+        value: normalized
+    };
+}
+
+function validateUserPasswordPayload(body) {
+    const value = isPlainObject(body) ? body : {};
+    const errors = [];
+    const normalized = {};
+
+    if (typeof value.password !== 'string' || !value.password) {
+        errors.push('Password is required');
+    } else if (value.password.length > 4096) {
+        errors.push('Password is too long');
+    } else {
+        normalized.password = value.password;
+    }
+
+    return {
+        valid: errors.length === 0,
+        errors,
+        value: normalized
+    };
+}
+
 function validatePackActionBody(body) {
     const value = isPlainObject(body) ? body : {};
     const mode = value.mode === undefined ? 'install_if_missing' : value.mode;
@@ -408,5 +519,7 @@ module.exports = {
     validateCommandPayload,
     validateLoginBody,
     validatePackActionBody,
-    validateRulePayload
+    validateRulePayload,
+    validateUserPasswordPayload,
+    validateUserPayload
 };

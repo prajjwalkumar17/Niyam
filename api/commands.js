@@ -70,7 +70,9 @@ function createCommandsRouter(db, broadcast, hooks = {}) {
         }
 
         const shaped = shapeCommandRecord(cmd);
-        shaped.approvals = db.prepare('SELECT * FROM approvals WHERE command_id = ?').all(req.params.id);
+        const approvals = db.prepare('SELECT * FROM approvals WHERE command_id = ? ORDER BY created_at ASC').all(req.params.id);
+        shaped.approvals = approvals;
+        applyApprovalSummary(shaped, approvals);
         res.json(shaped);
     });
 
@@ -103,6 +105,7 @@ function createCommandsRouter(db, broadcast, hooks = {}) {
         params.push(limitVal, offsetVal);
 
         const commands = db.prepare(query).all(...params).map(shapeCommandRecord);
+        enrichCommandsWithApprovals(db, commands);
 
         let countQuery = 'SELECT COUNT(*) as total FROM commands WHERE 1=1';
         const countParams = [];
@@ -152,3 +155,50 @@ function createCommandsRouter(db, broadcast, hooks = {}) {
 module.exports = {
     createCommandsRouter
 };
+
+function enrichCommandsWithApprovals(db, commands) {
+    if (!Array.isArray(commands) || commands.length === 0) {
+        return;
+    }
+
+    const ids = commands.map(command => command.id);
+    const placeholders = ids.map(() => '?').join(', ');
+    const approvals = db.prepare(`
+        SELECT *
+        FROM approvals
+        WHERE command_id IN (${placeholders})
+        ORDER BY created_at ASC
+    `).all(...ids);
+
+    const approvalMap = new Map();
+    approvals.forEach(approval => {
+        if (!approvalMap.has(approval.command_id)) {
+            approvalMap.set(approval.command_id, []);
+        }
+        approvalMap.get(approval.command_id).push(approval);
+    });
+
+    commands.forEach(command => {
+        applyApprovalSummary(command, approvalMap.get(command.id) || []);
+    });
+}
+
+function applyApprovalSummary(command, approvals) {
+    const approvedBy = approvals
+        .filter(approval => approval.decision === 'approved')
+        .map(approval => approval.approver);
+    const rejectedDecision = approvals.find(approval => approval.decision === 'rejected');
+    const distinctApprovers = [...new Set(approvedBy.filter(approver => approver !== command.requester))];
+    const twoPersonSatisfied = command.risk_level !== 'HIGH' || distinctApprovers.length >= 2;
+    const approvalCount = approvedBy.length;
+
+    command.approvedBy = approvedBy;
+    command.rejectedBy = rejectedDecision ? rejectedDecision.approver : null;
+    command.approvalProgress = {
+        count: approvalCount,
+        required: Number(command.required_approvals || 0),
+        remaining: Math.max(0, Number(command.required_approvals || 0) - approvalCount),
+        twoPersonSatisfied
+    };
+    command.approval_count = approvalCount;
+}

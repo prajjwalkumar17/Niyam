@@ -2,6 +2,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
+const BOOTSTRAP_START_MARKER = '# >>> niyam-bootstrap >>>';
+const BOOTSTRAP_END_MARKER = '# <<< niyam-bootstrap <<<';
 const START_MARKER = '# >>> niyam >>>';
 const END_MARKER = '# <<< niyam <<<';
 
@@ -24,26 +26,40 @@ function getShellRcPath(shell) {
 function renderShellInit(shell, cliBinPath) {
     const normalized = normalizeShell(shell);
     return normalized === 'zsh'
-        ? renderZshSnippet(cliBinPath)
-        : renderBashSnippet(cliBinPath);
+        ? `${renderZshBootstrapSnippet(cliBinPath)}\n${renderZshSnippet(cliBinPath)}`
+        : `${renderBashBootstrapSnippet(cliBinPath)}\n${renderBashSnippet(cliBinPath)}`;
 }
 
 function installShellSnippet(shell, cliBinPath) {
     const rcPath = getShellRcPath(shell);
-    const snippet = renderShellInit(shell, cliBinPath);
-    const next = upsertSnippet(readTextIfExists(rcPath), snippet);
+    const current = readTextIfExists(rcPath);
+    const bootstrapSnippet = shell === 'zsh'
+        ? renderZshBootstrapSnippet(cliBinPath)
+        : renderBashBootstrapSnippet(cliBinPath);
+    const wrapperSnippet = shell === 'zsh'
+        ? renderZshSnippet(cliBinPath)
+        : renderBashSnippet(cliBinPath);
+    const next = upsertSnippet(
+        upsertSnippet(current, bootstrapSnippet, BOOTSTRAP_START_MARKER, BOOTSTRAP_END_MARKER),
+        wrapperSnippet,
+        START_MARKER,
+        END_MARKER
+    );
     fs.writeFileSync(rcPath, next, 'utf8');
     return rcPath;
 }
 
-function removeShellSnippet(shell) {
+function removeShellSnippet(shell, options = {}) {
     const rcPath = getShellRcPath(shell);
     if (!fs.existsSync(rcPath)) {
         return { rcPath, changed: false };
     }
 
     const current = fs.readFileSync(rcPath, 'utf8');
-    const next = removeSnippet(current);
+    let next = removeSnippet(current, START_MARKER, END_MARKER);
+    if (options.includeBootstrap) {
+        next = removeSnippet(next, BOOTSTRAP_START_MARKER, BOOTSTRAP_END_MARKER);
+    }
     if (next === current) {
         return { rcPath, changed: false };
     }
@@ -62,17 +78,33 @@ function isShellSnippetInstalled(shell) {
     return contents.includes(START_MARKER) && contents.includes(END_MARKER);
 }
 
+function renderZshBootstrapSnippet(cliBinPath) {
+    const quotedBin = shellQuote(cliBinPath);
+    return `${BOOTSTRAP_START_MARKER}
+[[ -o interactive ]] || return 0
+export NIYAM_CLI_BIN=${quotedBin}
+
+niyam-on() {
+  command "$NIYAM_CLI_BIN" install --shell zsh || return $?
+  source "$HOME/.zshrc"
+}
+
+niyam-off() {
+  command "$NIYAM_CLI_BIN" disable --shell zsh || return $?
+  zle -A .accept-line accept-line 2>/dev/null || true
+  unfunction __niyam_accept_line __niyam_zsh_begin_command __niyam_zsh_run_local __niyam_zsh_type 2>/dev/null || true
+  source "$HOME/.zshrc"
+}
+${BOOTSTRAP_END_MARKER}
+`;
+}
+
 function renderZshSnippet(cliBinPath) {
     const quotedBin = shellQuote(cliBinPath);
     return `${START_MARKER}
 [[ -o interactive ]] || return 0
 export NIYAM_CLI_BIN=${quotedBin}
 export NIYAM_INTERCEPT_SESSION_ID="\${NIYAM_INTERCEPT_SESSION_ID:-\${HOST:-shell}-$$}"
-
-niyam-off() {
-  command "$NIYAM_CLI_BIN" uninstall --shell zsh || return $?
-  exec zsh -l
-}
 
 __niyam_zsh_type() {
   local token="$1"
@@ -172,6 +204,30 @@ ${END_MARKER}
 `;
 }
 
+function renderBashBootstrapSnippet(cliBinPath) {
+    const quotedBin = shellQuote(cliBinPath);
+    return `${BOOTSTRAP_START_MARKER}
+case $- in
+  *i*) ;;
+  *) return 0 2>/dev/null || exit 0 ;;
+esac
+export NIYAM_CLI_BIN=${quotedBin}
+
+niyam-on() {
+  command "$NIYAM_CLI_BIN" install --shell bash || return $?
+  source "$HOME/.bashrc"
+}
+
+niyam-off() {
+  command "$NIYAM_CLI_BIN" disable --shell bash || return $?
+  bind '"\C-m":accept-line' 2>/dev/null || true
+  unset -f __niyam_bash_accept_line __niyam_bash_begin_command __niyam_bash_run_local __niyam_bash_type __niyam_bash_first_token 2>/dev/null || true
+  source "$HOME/.bashrc"
+}
+${BOOTSTRAP_END_MARKER}
+`;
+}
+
 function renderBashSnippet(cliBinPath) {
     const quotedBin = shellQuote(cliBinPath);
     return `${START_MARKER}
@@ -181,11 +237,6 @@ case $- in
 esac
 export NIYAM_CLI_BIN=${quotedBin}
 export NIYAM_INTERCEPT_SESSION_ID="\${NIYAM_INTERCEPT_SESSION_ID:-\${HOSTNAME:-shell}-$$}"
-
-niyam-off() {
-  command "$NIYAM_CLI_BIN" uninstall --shell bash || return $?
-  exec bash -l
-}
 
 __niyam_bash_first_token() {
   local raw="$1"
@@ -293,15 +344,15 @@ ${END_MARKER}
 `;
 }
 
-function upsertSnippet(current, snippet) {
-    const next = removeSnippet(current || '');
+function upsertSnippet(current, snippet, startMarker, endMarker) {
+    const next = removeSnippet(current || '', startMarker, endMarker);
     const prefix = next.endsWith('\n') || next.length === 0 ? next : `${next}\n`;
     return `${prefix}${snippet}`;
 }
 
-function removeSnippet(current) {
+function removeSnippet(current, startMarker, endMarker) {
     const input = current || '';
-    const pattern = new RegExp(`${escapeRegex(START_MARKER)}[\\s\\S]*?${escapeRegex(END_MARKER)}\\n?`, 'g');
+    const pattern = new RegExp(`${escapeRegex(startMarker)}[\\s\\S]*?${escapeRegex(endMarker)}\\n?`, 'g');
     return input.replace(pattern, '').replace(/\n{3,}/g, '\n\n');
 }
 
@@ -318,6 +369,8 @@ function readTextIfExists(filePath) {
 }
 
 module.exports = {
+    BOOTSTRAP_END_MARKER,
+    BOOTSTRAP_START_MARKER,
     END_MARKER,
     START_MARKER,
     getShellRcPath,

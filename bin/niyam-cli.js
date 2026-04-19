@@ -270,7 +270,7 @@ async function handleUninstall(parsed) {
     const shell = parsed.options.shell
         ? normalizeShell(parsed.options.shell)
         : inferShell();
-    const result = removeShellSnippet(shell);
+    const result = removeShellSnippet(shell, { includeBootstrap: true });
     console.log(`${shell}: ${result.changed ? 'removed' : 'not installed'} (${result.rcPath})`);
 
     if (parsed.options['purge-config']) {

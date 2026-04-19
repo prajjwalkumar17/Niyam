@@ -2,6 +2,7 @@ const crypto = require('crypto');
 
 const { config } = require('../config');
 const { validateLoginBody, validationError } = require('../api/validation');
+const { createUsersService } = require('../services/users');
 
 function parseCookies(cookieHeader) {
     return String(cookieHeader || '')
@@ -42,12 +43,13 @@ function hashSessionToken(token) {
 }
 
 function createAuth(db) {
+    const usersService = createUsersService(db);
     const insertSession = db.prepare(`
-        INSERT INTO sessions (id, token_hash, identifier, roles, created_at, expires_at, last_seen_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO sessions (id, user_id, token_hash, identifier, roles, created_at, expires_at, last_seen_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const findSession = db.prepare(`
-        SELECT identifier, roles, expires_at
+        SELECT user_id, identifier, roles, expires_at
         FROM sessions
         WHERE token_hash = ?
     `);
@@ -57,15 +59,17 @@ function createAuth(db) {
     const deleteSession = db.prepare(`DELETE FROM sessions WHERE token_hash = ?`);
     const deleteExpiredSessions = db.prepare(`DELETE FROM sessions WHERE expires_at <= ?`);
 
-    function createSession(identifier) {
+    function createSession(user) {
         const rawToken = crypto.randomBytes(24).toString('hex');
         const now = new Date().toISOString();
         const expiresAt = new Date(Date.now() + config.SESSION_TTL_MS).toISOString();
+        const principal = usersService.buildUserPrincipal(user);
         insertSession.run(
             crypto.randomUUID(),
+            user.id,
             hashSessionToken(rawToken),
-            identifier,
-            JSON.stringify(['admin', 'approver']),
+            principal.identifier,
+            JSON.stringify(principal.roles || []),
             now,
             expiresAt,
             now
@@ -89,8 +93,19 @@ function createAuth(db) {
             return null;
         }
 
+        if (!session.user_id) {
+            deleteSession.run(tokenHash);
+            return null;
+        }
+
+        const user = usersService.getUserRecordById(session.user_id);
+        if (!user || !Boolean(user.enabled)) {
+            deleteSession.run(tokenHash);
+            return null;
+        }
+
         touchSession.run(new Date().toISOString(), tokenHash);
-        return buildPrincipal('user', session.identifier, JSON.parse(session.roles || '[]'));
+        return usersService.buildUserPrincipal(user);
     }
 
     function getAgentPrincipal(authorizationHeader) {
@@ -104,7 +119,7 @@ function createAuth(db) {
             return null;
         }
 
-        return buildPrincipal('agent', match[0], ['agent', 'submitter']);
+        return usersService.buildAgentPrincipal(match[0]);
     }
 
     function authenticateRequestHeaders(headers) {
@@ -174,14 +189,19 @@ function createAuth(db) {
             }
             const { username, password } = validation.value;
 
-            if (username !== config.ADMIN_USERNAME || password !== config.ADMIN_PASSWORD) {
-                return res.status(401).json({ error: 'Invalid credentials' });
+            const authenticated = usersService.authenticateLocalUser(username, password);
+            if (!authenticated.ok) {
+                const statusCode = authenticated.error === 'account_disabled' ? 403 : 401;
+                const message = authenticated.error === 'account_disabled'
+                    ? 'Account disabled'
+                    : 'Invalid credentials';
+                return res.status(statusCode).json({ error: message });
             }
 
-            issueSession(res, config.ADMIN_IDENTIFIER);
+            issueSession(res, authenticated.user);
             res.json({
                 authenticated: true,
-                principal: buildPrincipal('user', config.ADMIN_IDENTIFIER, ['admin', 'approver'])
+                principal: usersService.buildUserPrincipal(authenticated.user)
             });
         });
 
