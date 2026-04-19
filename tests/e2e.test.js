@@ -675,12 +675,14 @@ test('niyam-cli install, status, and disable manage shell integration in a temp 
     assert.ok(fs.readFileSync(rcPath, 'utf8').includes('# >>> niyam >>>'));
     assert.ok(renderedZsh.includes('__niyam_zsh_begin_command'));
     assert.ok(renderedZsh.includes('__niyam_zsh_finish_command'));
+    assert.ok(renderedZsh.includes('__niyam_zsh_safe_finish'));
     assert.ok(renderedZsh.includes('__niyam_zsh_expand_aliases'));
     assert.ok(renderedZsh.includes('precmd_functions'));
     assert.ok(renderedZsh.includes('niyam-on()'));
     assert.ok(renderedZsh.includes('niyam-off()'));
     assert.ok(renderedZsh.includes('zle reset-prompt\n  print'));
     assert.ok(renderedZsh.includes('zle reset-prompt\n  zle -R'));
+    assert.ok(renderedZsh.includes('__niyam_zsh_first_token __niyam_zsh_expand_aliases'));
     assert.ok(renderedBash.includes('__niyam_bash_expand_aliases'));
 
     const zshSyntax = await execFileAsync('zsh', ['-n', rcPath], {

@@ -92,7 +92,7 @@ niyam-on() {
 niyam-off() {
   command "$NIYAM_CLI_BIN" disable --shell zsh || return $?
   zle -A .accept-line accept-line 2>/dev/null || true
-  unfunction __niyam_accept_line __niyam_zsh_begin_command __niyam_zsh_finish_command __niyam_zsh_run_local __niyam_zsh_type 2>/dev/null || true
+  unfunction __niyam_accept_line __niyam_zsh_begin_command __niyam_zsh_finish_command __niyam_zsh_run_local __niyam_zsh_type __niyam_zsh_first_token __niyam_zsh_expand_aliases 2>/dev/null || true
   source "$HOME/.zshrc"
 }
 ${BOOTSTRAP_END_MARKER}
@@ -183,6 +183,15 @@ __niyam_zsh_finish_command() {
   zle -R
 }
 
+__niyam_zsh_safe_finish() {
+  if [[ "\${+functions[__niyam_zsh_finish_command]}" -eq 1 ]]; then
+    __niyam_zsh_finish_command
+  else
+    zle reset-prompt 2>/dev/null || true
+    zle -R 2>/dev/null || true
+  fi
+}
+
 __niyam_accept_line() {
   emulate -L zsh
   local raw="$BUFFER"
@@ -209,7 +218,7 @@ __niyam_accept_line() {
     __niyam_zsh_begin_command
     eval "$raw"
     local rc=$?
-    __niyam_zsh_finish_command
+    __niyam_zsh_safe_finish
     return $rc
   fi
 
@@ -242,17 +251,17 @@ __niyam_accept_line() {
       local dispatch_id="\${local_result#dispatch_id=}"
       __niyam_zsh_run_local "$raw" "$dispatch_id"
       rc=$?
-      __niyam_zsh_finish_command
+      __niyam_zsh_safe_finish
       return $rc
       ;;
     86)
       eval "$raw"
       rc=$?
-      __niyam_zsh_finish_command
+      __niyam_zsh_safe_finish
       return $rc
       ;;
     *)
-      __niyam_zsh_finish_command
+      __niyam_zsh_safe_finish
       return "$rc"
       ;;
   esac
