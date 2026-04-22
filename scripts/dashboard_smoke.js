@@ -18,7 +18,7 @@ async function main() {
     const adminUsername = process.env.NIYAM_ADMIN_USERNAME || env.NIYAM_ADMIN_USERNAME || 'admin';
     const adminPassword = process.env.NIYAM_ADMIN_PASSWORD || env.NIYAM_ADMIN_PASSWORD || '';
     const agentTokens = parseAgentTokens(process.env.NIYAM_AGENT_TOKENS || env.NIYAM_AGENT_TOKENS || '');
-    const agentIdentifier = process.env.NIYAM_DASHBOARD_SMOKE_AGENT || Object.keys(agentTokens)[0] || 'forger';
+    const agentIdentifier = process.env.NIYAM_DASHBOARD_SMOKE_AGENT || Object.keys(agentTokens)[0] || 'niyam-agent';
     const agentToken = process.env.NIYAM_DASHBOARD_SMOKE_AGENT_TOKEN || agentTokens[agentIdentifier] || '';
 
     if (!adminPassword) {

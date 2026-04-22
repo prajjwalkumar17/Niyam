@@ -18,6 +18,10 @@ const { createRulesRouter } = require('./api/rules');
 const { createRulePacksRouter } = require('./api/rule-packs');
 const { createPolicyRouter } = require('./api/policy');
 const { createAuditRouter } = require('./api/audit');
+const { createCliRouter } = require('./api/cli');
+const { createSignupRequestsRouter } = require('./api/signup-requests');
+const { createUsersRouter } = require('./api/users');
+const { buildWorkspaceRouter } = require('./api/workspace');
 const { broadcastManager, broadcast } = require('./ws/broadcast');
 const ExecutionGuard = require('./executor/guard');
 const { createRequestLogger, logger, metrics } = require('./observability');
@@ -87,6 +91,7 @@ const queueExecution = (commandId) => {
 // Public API routes
 app.use('/api', auth.authMiddleware);
 app.use('/api/auth', auth.createAuthRouter());
+app.use('/api/signup-requests', createSignupRequestsRouter(db, auth));
 
 app.get('/api/metrics', auth.authMiddleware, (req, res) => {
     if (config.METRICS_TOKEN) {
@@ -139,18 +144,24 @@ app.get('/api/health', (req, res) => {
 app.use('/api/commands', auth.requireAuth, createCommandsRouter(db, broadcast, { onApproved: queueExecution }));
 app.use('/api/approvals', auth.requireAuth, createApprovalsRouter(db, broadcast, { onApproved: queueExecution }));
 app.use('/api/policy', auth.requireAuth, createPolicyRouter(db));
+app.use('/api/cli', auth.requireAuth, createCliRouter(db, broadcast, auth, { onApproved: queueExecution }));
+app.use('/api/workspace', auth.requireAuth, buildWorkspaceRouter(db));
 app.use('/api/rules', auth.requireAdmin, createRulesRouter(db, broadcast));
 app.use('/api/rule-packs', auth.requireAdmin, createRulePacksRouter(db));
 app.use('/api/audit', auth.requireAdmin, createAuditRouter(db));
+app.use('/api/users', auth.requireAdmin, createUsersRouter(db));
 
 // Serve static dashboard
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Unknown API routes should fail explicitly instead of hanging inside the SPA fallback.
+app.use('/api', (_req, res) => {
+    res.status(404).json({ error: 'API route not found' });
+});
+
 // SPA fallback - serve index.html for all non-API routes
 app.get('*', (req, res) => {
-    if (!req.path.startsWith('/api')) {
-        res.sendFile(path.join(__dirname, 'public', 'index.html'));
-    }
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // Timeout checker - runs every 60 seconds

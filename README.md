@@ -14,6 +14,9 @@
 
 <p align="center">
   <a href="./docs/local_setup.md">Local Setup</a> ·
+  <a href="./docs/individual_setup.md">Individual Setup</a> ·
+  <a href="./docs/team_setup.md">Team Setup</a> ·
+  <a href="./docs/cli_wrapper.md">CLI Wrapper</a> ·
   <a href="./docs/usage.md">Usage</a> ·
   <a href="./docs/api_reference.md">API</a> ·
   <a href="./docs/deployment.md">Deployment</a> ·
@@ -41,6 +44,8 @@ So you can decide:
 ## What You Get
 
 - policy simulation before submission
+- interactive CLI wrapper for shell-native usage
+- optional team mode with local users and admin-approved signup
 - approvals for `LOW`, `MEDIUM`, and `HIGH`
 - rule-driven `DIRECT` vs `WRAPPER`
 - built-in policy templates for `gh`, `git`, `docker`, `kubectl`, and `terraform`
@@ -52,6 +57,7 @@ Examples:
 - `ls public` can auto-run as `LOW`
 - `git merge` can require approval and still stay `DIRECT`
 - `gh workflow run` can require approval and resolve to `WRAPPER`
+- `rm -rf build` can pause in the shell, show `approval 1/2 recorded`, and continue only after two distinct approvers sign off
 
 ## Product Preview
 
@@ -90,6 +96,9 @@ Windows users should start with [Local setup](./docs/local_setup.md), which incl
 ## Start Here
 
 - [Local setup](./docs/local_setup.md): macOS, Linux, Windows, first-run demo flow, curl examples
+- [Individual setup](./docs/individual_setup.md): one-person local setup, wrapper install, and the simplest operating model
+- [Team setup](./docs/team_setup.md): central-server rollout, multi-machine developer setup, and high-risk dual approval workflows
+- [CLI wrapper](./docs/cli_wrapper.md): install, auth modes, `login`, `logout`, `niyam-on`, `niyam-off`, and removal commands
 - [Usage guide](./docs/usage.md): approvals, packs, wrapper mode, operator flow
 - [Feature guide](./docs/features.md): simulation, templates, redaction
 - [API reference](./docs/api_reference.md): endpoints and payloads

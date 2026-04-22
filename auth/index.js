@@ -1,7 +1,13 @@
 const crypto = require('crypto');
 
 const { config } = require('../config');
-const { validateLoginBody, validationError } = require('../api/validation');
+const {
+    validateLoginBody,
+    validatePasswordChangePayload,
+    validationError
+} = require('../api/validation');
+const { logAudit } = require('../services/audit-log');
+const { createUsersService } = require('../services/users');
 
 function parseCookies(cookieHeader) {
     return String(cookieHeader || '')
@@ -33,21 +39,18 @@ function serializeCookie(name, value, options = {}) {
     return segments.join('; ');
 }
 
-function buildPrincipal(type, identifier, roles) {
-    return { type, identifier, roles };
-}
-
 function hashSessionToken(token) {
     return crypto.createHash('sha256').update(token).digest('hex');
 }
 
 function createAuth(db) {
+    const usersService = createUsersService(db);
     const insertSession = db.prepare(`
-        INSERT INTO sessions (id, token_hash, identifier, roles, created_at, expires_at, last_seen_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO sessions (id, user_id, token_hash, identifier, roles, created_at, expires_at, last_seen_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const findSession = db.prepare(`
-        SELECT identifier, roles, expires_at
+        SELECT user_id, identifier, roles, expires_at
         FROM sessions
         WHERE token_hash = ?
     `);
@@ -57,15 +60,17 @@ function createAuth(db) {
     const deleteSession = db.prepare(`DELETE FROM sessions WHERE token_hash = ?`);
     const deleteExpiredSessions = db.prepare(`DELETE FROM sessions WHERE expires_at <= ?`);
 
-    function createSession(identifier) {
+    function createSession(user) {
         const rawToken = crypto.randomBytes(24).toString('hex');
         const now = new Date().toISOString();
         const expiresAt = new Date(Date.now() + config.SESSION_TTL_MS).toISOString();
+        const principal = usersService.buildUserPrincipal(user);
         insertSession.run(
             crypto.randomUUID(),
+            user.id,
             hashSessionToken(rawToken),
-            identifier,
-            JSON.stringify(['admin', 'approver']),
+            principal.identifier,
+            JSON.stringify(principal.roles || []),
             now,
             expiresAt,
             now
@@ -89,8 +94,19 @@ function createAuth(db) {
             return null;
         }
 
+        if (!session.user_id) {
+            deleteSession.run(tokenHash);
+            return null;
+        }
+
+        const user = usersService.getUserRecordById(session.user_id);
+        if (!user || !Boolean(user.enabled)) {
+            deleteSession.run(tokenHash);
+            return null;
+        }
+
         touchSession.run(new Date().toISOString(), tokenHash);
-        return buildPrincipal('user', session.identifier, JSON.parse(session.roles || '[]'));
+        return usersService.buildUserPrincipal(user);
     }
 
     function getAgentPrincipal(authorizationHeader) {
@@ -104,7 +120,7 @@ function createAuth(db) {
             return null;
         }
 
-        return buildPrincipal('agent', match[0], ['agent', 'submitter']);
+        return usersService.buildAgentPrincipal(match[0]);
     }
 
     function authenticateRequestHeaders(headers) {
@@ -153,8 +169,8 @@ function createAuth(db) {
         }));
     }
 
-    function issueSession(res, identifier) {
-        const token = createSession(identifier);
+    function issueSession(res, user) {
+        const token = createSession(user);
         res.setHeader('Set-Cookie', serializeCookie(config.SESSION_COOKIE_NAME, token, {
             httpOnly: true,
             maxAge: Math.floor(config.SESSION_TTL_MS / 1000),
@@ -167,6 +183,12 @@ function createAuth(db) {
     function createAuthRouter() {
         const router = require('express').Router();
 
+        router.get('/config', (_req, res) => {
+            res.json({
+                allowSelfSignup: config.ENABLE_SELF_SIGNUP
+            });
+        });
+
         router.post('/login', (req, res) => {
             const validation = validateLoginBody(req.body);
             if (!validation.valid) {
@@ -174,15 +196,60 @@ function createAuth(db) {
             }
             const { username, password } = validation.value;
 
-            if (username !== config.ADMIN_USERNAME || password !== config.ADMIN_PASSWORD) {
-                return res.status(401).json({ error: 'Invalid credentials' });
+            const authenticated = usersService.authenticateLocalUser(username, password);
+            if (!authenticated.ok) {
+                const statusCode = authenticated.error === 'account_disabled' ? 403 : 401;
+                const message = authenticated.error === 'account_disabled'
+                    ? 'Account disabled'
+                    : 'Invalid credentials';
+                return res.status(statusCode).json({ error: message });
             }
 
-            issueSession(res, config.ADMIN_IDENTIFIER);
+            issueSession(res, authenticated.user);
             res.json({
                 authenticated: true,
-                principal: buildPrincipal('user', config.ADMIN_IDENTIFIER, ['admin', 'approver'])
+                principal: usersService.buildUserPrincipal(authenticated.user)
             });
+        });
+
+        router.post('/change-password', requireAuth, (req, res) => {
+            if (!req.principal || req.principal.type !== 'user') {
+                return res.status(403).json({ error: 'Only local users can change passwords' });
+            }
+
+            const validation = validatePasswordChangePayload(req.body);
+            if (!validation.valid) {
+                return validationError(res, validation.errors);
+            }
+
+            try {
+                const currentUser = usersService.getUserByUsername(req.principal.identifier);
+                if (!currentUser) {
+                    return res.status(404).json({ error: 'User not found' });
+                }
+
+                const user = usersService.changeOwnPassword(
+                    currentUser.id,
+                    validation.value.currentPassword,
+                    validation.value.newPassword
+                );
+                issueSession(res, usersService.getUserRecordById(user.id));
+                logAudit(db, 'password_changed', 'user', user.id, req.actor, {
+                    username: user.username
+                });
+                return res.json({
+                    passwordChanged: true,
+                    principal: usersService.buildUserPrincipal(user.id)
+                });
+            } catch (error) {
+                if (error.code === 'invalid_credentials') {
+                    return res.status(401).json({ error: error.message });
+                }
+                if (error.code === 'not_found') {
+                    return res.status(404).json({ error: error.message });
+                }
+                throw error;
+            }
         });
 
         router.post('/logout', (req, res) => {

@@ -47,6 +47,110 @@ const MIGRATIONS = [
                 'CREATE INDEX idx_rules_managed_pack ON rules(managed_by_pack, managed_by_pack_rule_id)'
             );
         }
+    },
+    {
+        id: '003_cli_dispatches',
+        description: 'Add CLI dispatch tracking for interactive shell governance',
+        up(db) {
+            if (!hasTable(db, 'cli_dispatches')) {
+                db.exec(`
+                    CREATE TABLE cli_dispatches (
+                        id TEXT PRIMARY KEY,
+                        command TEXT NOT NULL,
+                        requester TEXT NOT NULL,
+                        requester_type TEXT DEFAULT 'agent',
+                        metadata TEXT,
+                        exec_command TEXT,
+                        working_dir TEXT,
+                        shell TEXT,
+                        session_id TEXT,
+                        first_token TEXT,
+                        first_token_type TEXT,
+                        has_shell_syntax INTEGER DEFAULT 0,
+                        interactive_hint INTEGER DEFAULT 0,
+                        route TEXT NOT NULL,
+                        reason TEXT,
+                        passthrough_reason TEXT,
+                        risk_level TEXT NOT NULL,
+                        execution_mode TEXT,
+                        status TEXT NOT NULL,
+                        command_id TEXT,
+                        local_exit_code INTEGER,
+                        local_signal TEXT,
+                        duration_ms INTEGER,
+                        completed_at TEXT,
+                        redaction_summary TEXT,
+                        redacted INTEGER DEFAULT 0,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        FOREIGN KEY (command_id) REFERENCES commands(id) ON DELETE SET NULL
+                    );
+                `);
+            }
+
+            ensureIndex(db, 'idx_cli_dispatches_route', 'CREATE INDEX idx_cli_dispatches_route ON cli_dispatches(route)');
+            ensureIndex(db, 'idx_cli_dispatches_status', 'CREATE INDEX idx_cli_dispatches_status ON cli_dispatches(status)');
+            ensureIndex(db, 'idx_cli_dispatches_requester', 'CREATE INDEX idx_cli_dispatches_requester ON cli_dispatches(requester)');
+            ensureIndex(db, 'idx_cli_dispatches_command_id', 'CREATE INDEX idx_cli_dispatches_command_id ON cli_dispatches(command_id)');
+            ensureIndex(db, 'idx_cli_dispatches_created_at', 'CREATE INDEX idx_cli_dispatches_created_at ON cli_dispatches(created_at)');
+        }
+    },
+    {
+        id: '004_local_users',
+        description: 'Add managed local dashboard users and bind sessions to user ids',
+        up(db) {
+            if (!hasTable(db, 'local_users')) {
+                db.exec(`
+                    CREATE TABLE local_users (
+                        id TEXT PRIMARY KEY,
+                        username TEXT NOT NULL UNIQUE,
+                        display_name TEXT,
+                        password_hash TEXT NOT NULL,
+                        enabled INTEGER DEFAULT 1,
+                        roles TEXT NOT NULL,
+                        last_login_at TEXT,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        metadata TEXT
+                    );
+                `);
+            }
+
+            ensureColumn(db, 'sessions', 'user_id', 'ALTER TABLE sessions ADD COLUMN user_id TEXT');
+            db.exec(`DELETE FROM sessions`);
+            db.exec(`DELETE FROM approvers WHERE identifier = 'user'`);
+
+            ensureIndex(db, 'idx_local_users_enabled', 'CREATE INDEX idx_local_users_enabled ON local_users(enabled)');
+        }
+    },
+    {
+        id: '005_signup_requests',
+        description: 'Add optional self-signup request workflow for team deployments',
+        up(db) {
+            if (!hasTable(db, 'signup_requests')) {
+                db.exec(`
+                    CREATE TABLE signup_requests (
+                        id TEXT PRIMARY KEY,
+                        username TEXT NOT NULL,
+                        display_name TEXT,
+                        password_hash TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        decision_reason TEXT,
+                        requested_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        reviewed_at TEXT,
+                        reviewed_by TEXT,
+                        user_id TEXT,
+                        metadata TEXT,
+                        FOREIGN KEY (user_id) REFERENCES local_users(id) ON DELETE SET NULL
+                    );
+                `);
+            }
+
+            ensureIndex(db, 'idx_signup_requests_status', 'CREATE INDEX idx_signup_requests_status ON signup_requests(status)');
+            ensureIndex(db, 'idx_signup_requests_username', 'CREATE INDEX idx_signup_requests_username ON signup_requests(username)');
+            ensureIndex(db, 'idx_signup_requests_requested_at', 'CREATE INDEX idx_signup_requests_requested_at ON signup_requests(requested_at)');
+        }
     }
 ];
 

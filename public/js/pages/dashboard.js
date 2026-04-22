@@ -37,8 +37,8 @@ function renderDashboard(container) {
             <div class="surface-card">
                 <div class="surface-section-head">
                     <div>
-                        <div class="card-title">Recent Activity</div>
-                        <div class="surface-section-copy">Latest policy decisions, approvals, and execution events.</div>
+                        <div class="card-title">Recent Commands</div>
+                        <div class="surface-section-copy">Latest command submissions and their current approval or execution state.</div>
                     </div>
                 </div>
                 <div class="activity-feed" id="recent-activity"></div>
@@ -78,39 +78,22 @@ async function loadDashboardStats() {
 
 async function loadRecentActivity() {
     try {
-        const response = await apiFetch('/audit?limit=10');
+        const response = await apiFetch('/commands?limit=10');
         const data = await response.json();
         
         const feed = document.getElementById('recent-activity');
         
-        if (!data.entries || data.entries.length === 0) {
+        if (!data.commands || data.commands.length === 0) {
             feed.innerHTML = renderEmptyState('No recent activity', 'activity');
             return;
         }
-        
-        const icons = {
-            command_submitted: renderEventChip('SB'),
-            command_approved: renderEventChip('OK', 'approved'),
-            command_rejected: renderEventChip('NO', 'rejected'),
-            command_executed: renderEventChip('EX'),
-            command_failed: renderEventChip('ER', 'error'),
-            command_blocked: renderEventChip('BL', 'warning'),
-            command_timeout: renderEventChip('TM', 'warning'),
-            approval_granted: renderEventChip('AP', 'approved'),
-            rule_created: renderEventChip('RC'),
-            rule_updated: renderEventChip('RU'),
-            rule_deleted: renderEventChip('RD', 'rejected'),
-            rule_pack_installed: renderEventChip('PK'),
-            rule_pack_upgrade_previewed: renderEventChip('PV'),
-            rule_pack_upgraded: renderEventChip('UP')
-        };
-        
-        feed.innerHTML = data.entries.map(entry => `
+
+        feed.innerHTML = data.commands.map(command => `
             <div class="activity-item">
-                <span class="activity-icon">${icons[entry.event_type] || renderEventChip('EV')}</span>
+                <span class="activity-icon">${renderCommandStatusChip(command)}</span>
                 <div class="activity-content">
-                    <div class="activity-title">${formatEventType(entry.event_type)} ${entry.details?.command ? '→ <code>' + escapeHtml(entry.details.command) + '</code>' : ''}</div>
-                    <div class="activity-time">${entry.actor} · ${timeAgo(entry.created_at)}</div>
+                    <div class="activity-title"><code>${escapeHtml(buildCommandLineDisplay(command))}</code></div>
+                    <div class="activity-time">${escapeHtml(command.requester)} · ${escapeHtml(command.status)} · ${timeAgo(command.created_at)}</div>
                 </div>
             </div>
         `).join('');
@@ -133,13 +116,16 @@ async function loadPendingPreview() {
         
         container.innerHTML = `<div class="pending-preview-list">${
             data.commands.map(cmd => `
-            <div class="pending-preview-item" onclick="openApprovalModal('${cmd.id}', '${escapeHtml(cmd.command)}', '${cmd.risk_level}')">
+            <div class="pending-preview-item review-preview-btn"
+                data-id="${cmd.id}"
+                data-risk="${cmd.risk_level}"
+                data-command="${encodeURIComponent(buildCommandLineDisplay(cmd))}">
                 <div class="pending-preview-main">
                     <div class="pending-preview-head">
                         <span class="risk-badge ${cmd.risk_level.toLowerCase()}">${cmd.risk_level}</span>
-                        <code class="pending-preview-command">${escapeHtml(cmd.command)}</code>
+                        <code class="pending-preview-command">${escapeHtml(buildCommandLineDisplay(cmd))}</code>
                     </div>
-                    <div class="pending-preview-meta">${cmd.requester} · ${timeAgo(cmd.created_at)} · ${cmd.approval_count}/${cmd.required_approvals} approvals</div>
+                    <div class="pending-preview-meta">${cmd.requester} · ${timeAgo(cmd.created_at)} · ${formatApprovalProgress(cmd)}</div>
                 </div>
                 <div class="pending-preview-timer">
                     ${renderTimer(cmd.timeout_at, cmd.created_at, 'bar')}
@@ -147,6 +133,16 @@ async function loadPendingPreview() {
             </div>
         `).join('')
         }</div>`;
+
+        container.querySelectorAll('.review-preview-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                openApprovalModal(
+                    btn.dataset.id,
+                    decodeURIComponent(btn.dataset.command || ''),
+                    btn.dataset.risk
+                );
+            });
+        });
     } catch (e) {
         document.getElementById('pending-preview').innerHTML = renderEmptyState('Failed to load pending preview', 'blocked');
     }
@@ -154,4 +150,13 @@ async function loadPendingPreview() {
 
 function formatEventType(type) {
     return type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+}
+
+function renderCommandStatusChip(command) {
+    const status = String(command.status || 'pending').toLowerCase();
+    if (status === 'completed') return renderEventChip('OK', 'approved');
+    if (status === 'failed' || status === 'rejected') return renderEventChip('ER', 'error');
+    if (status === 'pending') return renderEventChip('PD', 'warning');
+    if (status === 'executing') return renderEventChip('EX');
+    return renderEventChip('CM');
 }

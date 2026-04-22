@@ -50,7 +50,23 @@
                 </a>
             </li>
             <li>
-                <a href="#rules" class="nav-link" data-page="rules">
+                <a href="#workspace" class="nav-link" data-page="workspace">
+                    <span class="nav-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24"><path d="M4 6h16v12H4zM8 10h8M8 14h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </span>
+                    <span class="nav-text">Workspace</span>
+                </a>
+            </li>
+            <li>
+                <a href="#dispatches" class="nav-link" data-page="dispatches" data-admin-only="true">
+                    <span class="nav-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24"><path d="M5 12h4l2-4 3 8 2-4h3M6 6h12M6 18h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </span>
+                    <span class="nav-text">Dispatches</span>
+                </a>
+            </li>
+            <li>
+                <a href="#rules" class="nav-link" data-page="rules" data-admin-only="true">
                     <span class="nav-icon" aria-hidden="true">
                         <svg viewBox="0 0 24 24"><path d="M9 4h6l1 2h3v14H5V6h3l1-2Zm0 6h6M9 12h6M9 16h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </span>
@@ -58,11 +74,19 @@
                 </a>
             </li>
             <li>
-                <a href="#audit" class="nav-link" data-page="audit">
+                <a href="#audit" class="nav-link" data-page="audit" data-admin-only="true">
                     <span class="nav-icon" aria-hidden="true">
                         <svg viewBox="0 0 24 24"><path d="M10.5 18a7.5 7.5 0 1 1 5.3-2.2L20 20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </span>
                     <span class="nav-text">Audit Log</span>
+                </a>
+            </li>
+            <li>
+                <a href="#users" class="nav-link" data-page="users" data-admin-only="true">
+                    <span class="nav-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24"><path d="M7 18a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm10-2a3 3 0 1 1 0-6 3 3 0 0 1 0 6ZM3 21a5.5 5.5 0 0 1 8 0m5.5-.5a4.5 4.5 0 0 1 4.5 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </span>
+                    <span class="nav-text">Users</span>
                 </a>
             </li>
         </ul>
@@ -96,8 +120,11 @@
                     </span>
                     Submit Command
                 </button>
-                <button class="btn btn-secondary has-tooltip tooltip-below tooltip-right" id="logout-btn" style="display:none" data-tooltip="End the current local admin session.">
+                <button class="btn btn-secondary has-tooltip tooltip-below tooltip-right" id="logout-btn" style="display:none" data-tooltip="End the current local session.">
                     Sign Out
+                </button>
+                <button class="btn btn-secondary has-tooltip tooltip-below tooltip-right" id="change-password-btn" style="display:none" data-tooltip="Change the password for the current local account.">
+                    Change Password
                 </button>
             </div>
         </header>
@@ -181,7 +208,7 @@
                     <img src="/assets/niyam-mark.svg" alt="Niyam" class="login-brand-mark">
                     <div>
                         <div class="login-brand-name">Niyam</div>
-                        <div class="login-brand-copy">Local operator access</div>
+                        <div class="login-brand-copy">Sign in with a local Niyam account</div>
                     </div>
                 </div>
             </div>
@@ -194,10 +221,70 @@
                     <label for="login-password">Password</label>
                     <input type="password" id="login-password" class="form-input" autocomplete="current-password">
                 </div>
-                <div class="text-sm text-muted" id="login-status">Dashboard access requires a local admin session.</div>
+                <div class="text-sm text-muted" id="login-status">Sign in with a local Niyam account to continue.</div>
             </div>
             <div class="modal-footer">
+                <button class="btn btn-secondary" id="show-signup-btn" style="display:none">Request Access</button>
                 <button class="btn btn-primary" id="login-btn">Sign In</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Signup Overlay -->
+    <div class="modal-overlay" id="signup-overlay" style="display:none">
+        <div class="modal login-modal">
+            <div class="modal-header">
+                <div class="login-brand">
+                    <img src="/assets/niyam-mark.svg" alt="Niyam" class="login-brand-mark">
+                    <div>
+                        <div class="login-brand-name">Request Access</div>
+                        <div class="login-brand-copy">Create a local account request for admin approval</div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="signup-username">Username</label>
+                    <input type="text" id="signup-username" class="form-input" autocomplete="username" placeholder="e.g. alice">
+                </div>
+                <div class="form-group">
+                    <label for="signup-display-name">Display Name</label>
+                    <input type="text" id="signup-display-name" class="form-input" autocomplete="name" placeholder="e.g. Alice">
+                </div>
+                <div class="form-group">
+                    <label for="signup-password">Password</label>
+                    <input type="password" id="signup-password" class="form-input" autocomplete="new-password">
+                </div>
+                <div class="text-sm text-muted" id="signup-status">Your request stays pending until an admin approves it.</div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="signup-back-btn">Back to Sign In</button>
+                <button class="btn btn-primary" id="signup-btn">Request Access</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Change Password Modal -->
+    <div class="modal-overlay" id="password-modal" style="display:none">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Change Password</h2>
+                <button class="modal-close" id="password-modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="password-current">Current Password</label>
+                    <input type="password" id="password-current" class="form-input" autocomplete="current-password">
+                </div>
+                <div class="form-group">
+                    <label for="password-new">New Password</label>
+                    <input type="password" id="password-new" class="form-input" autocomplete="new-password">
+                </div>
+                <div class="text-sm text-muted" id="password-status"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="password-cancel-btn">Cancel</button>
+                <button class="btn btn-primary" id="password-save-btn">Save Password</button>
             </div>
         </div>
     </div>
@@ -207,7 +294,10 @@
     <script src="/js/pages/dashboard.js"></script>
     <script src="/js/pages/pending.js"></script>
     <script src="/js/pages/history.js"></script>
+    <script src="/js/pages/workspace.js"></script>
+    <script src="/js/pages/dispatches.js"></script>
     <script src="/js/pages/rules.js"></script>
     <script src="/js/pages/audit.js"></script>
+    <script src="/js/pages/users.js"></script>
 </body>
 </html>

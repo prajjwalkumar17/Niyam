@@ -4,7 +4,7 @@
 
 const { v4: uuidv4 } = require('uuid');
 const { validateRule } = require('../policy/rules');
-const { logAudit } = require('./commands');
+const { logAudit } = require('../services/audit-log');
 const { validateRulePayload, validationError } = require('./validation');
 
 function createRulesRouter(db, broadcast) {

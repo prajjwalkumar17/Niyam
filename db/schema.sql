@@ -88,15 +88,79 @@ CREATE TABLE IF NOT EXISTS approvers (
     metadata TEXT
 );
 
+-- Local users table: dashboard accounts managed inside Niyam
+CREATE TABLE IF NOT EXISTS local_users (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE,
+    display_name TEXT,
+    password_hash TEXT NOT NULL,
+    enabled INTEGER DEFAULT 1,
+    roles TEXT NOT NULL,
+    last_login_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    metadata TEXT
+);
+
+CREATE TABLE IF NOT EXISTS signup_requests (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL,
+    display_name TEXT,
+    password_hash TEXT NOT NULL,
+    status TEXT NOT NULL,
+    decision_reason TEXT,
+    requested_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    reviewed_at TEXT,
+    reviewed_by TEXT,
+    user_id TEXT,
+    metadata TEXT,
+    FOREIGN KEY (user_id) REFERENCES local_users(id) ON DELETE SET NULL
+);
+
 -- Sessions table: persistent dashboard sessions
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
+    user_id TEXT,
     token_hash TEXT NOT NULL UNIQUE,
     identifier TEXT NOT NULL,
     roles TEXT NOT NULL,          -- JSON array
     created_at TEXT NOT NULL,
     expires_at TEXT NOT NULL,
-    last_seen_at TEXT NOT NULL
+    last_seen_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES local_users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS cli_dispatches (
+    id TEXT PRIMARY KEY,
+    command TEXT NOT NULL,
+    requester TEXT NOT NULL,
+    requester_type TEXT DEFAULT 'agent',
+    metadata TEXT,
+    exec_command TEXT,
+    working_dir TEXT,
+    shell TEXT,
+    session_id TEXT,
+    first_token TEXT,
+    first_token_type TEXT,
+    has_shell_syntax INTEGER DEFAULT 0,
+    interactive_hint INTEGER DEFAULT 0,
+    route TEXT NOT NULL,
+    reason TEXT,
+    passthrough_reason TEXT,
+    risk_level TEXT NOT NULL,
+    execution_mode TEXT,
+    status TEXT NOT NULL,
+    command_id TEXT,
+    local_exit_code INTEGER,
+    local_signal TEXT,
+    duration_ms INTEGER,
+    completed_at TEXT,
+    redaction_summary TEXT,
+    redacted INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (command_id) REFERENCES commands(id) ON DELETE SET NULL
 );
 
 -- Create indexes for common queries
@@ -112,4 +176,13 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at);
 CREATE INDEX IF NOT EXISTS idx_rules_enabled ON rules(enabled);
 CREATE INDEX IF NOT EXISTS idx_rules_priority ON rules(priority DESC);
 CREATE INDEX IF NOT EXISTS idx_rules_managed_pack ON rules(managed_by_pack, managed_by_pack_rule_id);
+CREATE INDEX IF NOT EXISTS idx_local_users_enabled ON local_users(enabled);
+CREATE INDEX IF NOT EXISTS idx_signup_requests_status ON signup_requests(status);
+CREATE INDEX IF NOT EXISTS idx_signup_requests_username ON signup_requests(username);
+CREATE INDEX IF NOT EXISTS idx_signup_requests_requested_at ON signup_requests(requested_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
+CREATE INDEX IF NOT EXISTS idx_cli_dispatches_route ON cli_dispatches(route);
+CREATE INDEX IF NOT EXISTS idx_cli_dispatches_status ON cli_dispatches(status);
+CREATE INDEX IF NOT EXISTS idx_cli_dispatches_requester ON cli_dispatches(requester);
+CREATE INDEX IF NOT EXISTS idx_cli_dispatches_command_id ON cli_dispatches(command_id);
+CREATE INDEX IF NOT EXISTS idx_cli_dispatches_created_at ON cli_dispatches(created_at);

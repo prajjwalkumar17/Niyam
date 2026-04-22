@@ -7,6 +7,9 @@ const state = {
     currentPage: 'dashboard',
     ws: null,
     principal: null,
+    authConfig: {
+        allowSelfSignup: false
+    },
     initialized: false,
     wsReconnectTimer: null,
     pendingCount: 0,
@@ -26,8 +29,10 @@ const AUTO_REFRESH_MS = 10000;
 
 const ICONS = {
     dashboard: '<svg viewBox="0 0 24 24"><path d="M4 19h16M7 15v-4M12 15V7M17 15v-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+    workspace: '<svg viewBox="0 0 24 24"><path d="M4 6h16v12H4zM8 10h8M8 14h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     pending: '<svg viewBox="0 0 24 24"><path d="M8 4h8M8 20h8M8 4c0 4 8 4 8 8s-8 4-8 8M16 4c0 4-8 4-8 8s8 4 8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     history: '<svg viewBox="0 0 24 24"><path d="M8 5h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8a3 3 0 1 1 0-6h10M8 5a3 3 0 1 0 0 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    dispatches: '<svg viewBox="0 0 24 24"><path d="M5 12h4l2-4 3 8 2-4h3M6 6h12M6 18h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     rules: '<svg viewBox="0 0 24 24"><path d="M9 4h6l1 2h3v14H5V6h3l1-2Zm0 6h6M9 12h6M9 16h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     audit: '<svg viewBox="0 0 24 24"><path d="M10.5 18a7.5 7.5 0 1 1 5.3-2.2L20 20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     activity: '<svg viewBox="0 0 24 24"><path d="M5 12h4l2-4 3 8 2-4h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -35,6 +40,9 @@ const ICONS = {
     blocked: '<svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
     package: '<svg viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Zm0 0v9m8-4.5-8 4.5-8-4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 };
+
+const ALL_PAGES = ['dashboard', 'workspace', 'pending', 'history', 'dispatches', 'rules', 'audit', 'users'];
+const DEFAULT_USER_PAGES = ['dashboard', 'workspace', 'pending', 'history'];
 
 function renderUiIcon(name, className = '') {
     const svg = ICONS[name] || ICONS.activity;
@@ -62,12 +70,13 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function bootstrapApp() {
+    await loadAuthConfig();
     initAuthUi();
     updateAutoRefreshButton();
 
     const restored = await restoreSession();
     if (!restored) {
-        enterUnauthenticatedState('Dashboard access requires a local admin session.');
+        enterUnauthenticatedState('Sign in with a local Niyam account to continue.');
     }
 }
 
@@ -91,7 +100,44 @@ function initAuthUi() {
             submitLogin();
         }
     });
+    document.getElementById('show-signup-btn').addEventListener('click', openSignupOverlay);
+    document.getElementById('signup-back-btn').addEventListener('click', () => {
+        closeSignupOverlay();
+        showLoginOverlay('Sign in with a local Niyam account to continue.');
+    });
+    document.getElementById('signup-btn').addEventListener('click', submitSignupRequest);
+    document.getElementById('signup-password').addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            submitSignupRequest();
+        }
+    });
     document.getElementById('logout-btn').addEventListener('click', logout);
+    document.getElementById('change-password-btn').addEventListener('click', openPasswordModal);
+    document.getElementById('password-modal-close').addEventListener('click', closePasswordModal);
+    document.getElementById('password-cancel-btn').addEventListener('click', closePasswordModal);
+    document.getElementById('password-save-btn').addEventListener('click', submitPasswordChange);
+    document.getElementById('password-new').addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            submitPasswordChange();
+        }
+    });
+}
+
+async function loadAuthConfig() {
+    try {
+        const response = await fetch(`${API_BASE}/auth/config`);
+        if (!response.ok) {
+            return;
+        }
+
+        const result = await response.json();
+        state.authConfig = {
+            ...state.authConfig,
+            ...result
+        };
+    } catch (error) {
+        // Leave defaults in place.
+    }
 }
 
 async function restoreSession() {
@@ -113,6 +159,7 @@ function enterAuthenticatedState(principal) {
     state.principal = principal;
     hideLoginOverlay();
     updateSessionUi();
+    updateNavigationForPrincipal();
 
     if (!state.initialized) {
         initNavigation();
@@ -121,13 +168,14 @@ function enterAuthenticatedState(principal) {
 
         const pageFromHash = (window.location.hash || '').replace('#', '');
         const savedPage = localStorage.getItem('niyam.currentPage');
-        const initialPage = ['dashboard', 'pending', 'history', 'rules', 'audit'].includes(pageFromHash)
+        const allowedPages = getAllowedPages(principal);
+        const initialPage = allowedPages.includes(pageFromHash)
             ? pageFromHash
-            : (['dashboard', 'pending', 'history', 'rules', 'audit'].includes(savedPage) ? savedPage : 'dashboard');
+            : (allowedPages.includes(savedPage) ? savedPage : 'dashboard');
 
         window.addEventListener('hashchange', () => {
             const page = (window.location.hash || '').replace('#', '');
-            if (state.principal && ['dashboard', 'pending', 'history', 'rules', 'audit'].includes(page) && page !== state.currentPage) {
+            if (state.principal && getAllowedPages(state.principal).includes(page) && page !== state.currentPage) {
                 navigateTo(page);
             }
         });
@@ -147,8 +195,10 @@ function enterAuthenticatedState(principal) {
 function enterUnauthenticatedState(message) {
     state.principal = null;
     updateSessionUi();
+    updateNavigationForPrincipal();
     closeApprovalModal();
     closeModal();
+    closePasswordModal();
     stopRealtime();
     showLoginOverlay(message);
 }
@@ -156,34 +206,50 @@ function enterUnauthenticatedState(message) {
 function updateSessionUi() {
     const pill = document.getElementById('session-pill');
     const logoutBtn = document.getElementById('logout-btn');
+    const changePasswordBtn = document.getElementById('change-password-btn');
     const submitBtn = document.getElementById('submit-command-btn');
 
     if (!state.principal) {
         pill.textContent = 'Not signed in';
         logoutBtn.style.display = 'none';
+        changePasswordBtn.style.display = 'none';
         submitBtn.disabled = true;
         return;
     }
 
-    pill.textContent = `${state.principal.identifier} · ${state.principal.type}`;
+    pill.textContent = describePrincipal(state.principal);
     logoutBtn.style.display = 'inline-flex';
+    changePasswordBtn.style.display = state.principal.type === 'user' ? 'inline-flex' : 'none';
     submitBtn.disabled = false;
 }
 
 function showLoginOverlay(message) {
+    closeSignupOverlay();
     document.getElementById('login-overlay').style.display = 'flex';
-    setLoginStatus(message || 'Dashboard access requires a local admin session.');
+    updateAuthOverlayActions();
+    setLoginStatus(message || 'Sign in with a local Niyam account to continue.');
     document.getElementById('login-password').focus();
 }
 
 function hideLoginOverlay() {
     document.getElementById('login-overlay').style.display = 'none';
-    setLoginStatus('Dashboard access requires a local admin session.');
+    document.getElementById('signup-overlay').style.display = 'none';
+    setLoginStatus('Sign in with a local Niyam account to continue.');
     document.getElementById('login-password').value = '';
+    setSignupStatus('Your request stays pending until an admin approves it.');
+    document.getElementById('signup-password').value = '';
 }
 
 function setLoginStatus(message) {
     document.getElementById('login-status').textContent = message;
+}
+
+function setSignupStatus(message) {
+    document.getElementById('signup-status').textContent = message;
+}
+
+function updateAuthOverlayActions() {
+    document.getElementById('show-signup-btn').style.display = state.authConfig.allowSelfSignup ? 'inline-flex' : 'none';
 }
 
 async function submitLogin() {
@@ -215,6 +281,58 @@ async function submitLogin() {
     }
 }
 
+function openSignupOverlay() {
+    if (!state.authConfig.allowSelfSignup) {
+        return;
+    }
+
+    document.getElementById('login-overlay').style.display = 'none';
+    document.getElementById('signup-overlay').style.display = 'flex';
+    setSignupStatus('Your request stays pending until an admin approves it.');
+    document.getElementById('signup-username').focus();
+}
+
+function closeSignupOverlay() {
+    document.getElementById('signup-overlay').style.display = 'none';
+}
+
+async function submitSignupRequest() {
+    const username = document.getElementById('signup-username').value.trim();
+    const displayName = document.getElementById('signup-display-name').value.trim();
+    const password = document.getElementById('signup-password').value;
+
+    if (!username || !password) {
+        setSignupStatus('Username and password are required.');
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/signup-requests`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                username,
+                displayName: displayName || null,
+                password
+            })
+        });
+        const result = await response.json();
+
+        if (!response.ok) {
+            setSignupStatus(result.error || result.details?.join(', ') || 'Unable to submit signup request.');
+            return;
+        }
+
+        document.getElementById('signup-username').value = '';
+        document.getElementById('signup-display-name').value = '';
+        document.getElementById('signup-password').value = '';
+        closeSignupOverlay();
+        showLoginOverlay(`Access request submitted for ${result.username}. Wait for admin approval.`);
+    } catch (error) {
+        setSignupStatus('Network error while requesting access.');
+    }
+}
+
 async function logout() {
     try {
         await fetch(`${API_BASE}/auth/logout`, { method: 'POST' });
@@ -225,11 +343,58 @@ async function logout() {
     enterUnauthenticatedState('Signed out.');
 }
 
+function openPasswordModal() {
+    if (!state.principal || state.principal.type !== 'user') {
+        return;
+    }
+
+    document.getElementById('password-current').value = '';
+    document.getElementById('password-new').value = '';
+    document.getElementById('password-status').textContent = '';
+    document.getElementById('password-modal').style.display = 'flex';
+    document.getElementById('password-current').focus();
+}
+
+function closePasswordModal() {
+    document.getElementById('password-modal').style.display = 'none';
+}
+
+async function submitPasswordChange() {
+    const currentPassword = document.getElementById('password-current').value;
+    const newPassword = document.getElementById('password-new').value;
+
+    if (!currentPassword || !newPassword) {
+        document.getElementById('password-status').textContent = 'Current password and new password are required.';
+        return;
+    }
+
+    try {
+        const response = await apiFetch('/auth/change-password', {
+            allowUnauthorizedResponse: true,
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ currentPassword, newPassword })
+        });
+        const result = await response.json();
+
+        if (!response.ok) {
+            document.getElementById('password-status').textContent = result.error || result.details?.join(', ') || 'Password change failed.';
+            return;
+        }
+
+        closePasswordModal();
+        enterAuthenticatedState(result.principal);
+        showNotification('Password updated', 'success');
+    } catch (error) {
+        document.getElementById('password-status').textContent = 'Network error while changing password.';
+    }
+}
+
 async function apiFetch(path, options = {}) {
     const url = path.startsWith('/api') ? path : `${API_BASE}${path}`;
     const response = await fetch(url, options);
 
-    if (response.status === 401) {
+    if (response.status === 401 && !options.allowUnauthorizedResponse) {
         enterUnauthenticatedState('Session expired. Sign in again.');
         throw new Error('Authentication required');
     }
@@ -238,7 +403,7 @@ async function apiFetch(path, options = {}) {
 }
 
 function navigateTo(page) {
-    if (!['dashboard', 'pending', 'history', 'rules', 'audit'].includes(page)) {
+    if (!getAllowedPages(state.principal).includes(page)) {
         page = 'dashboard';
     }
 
@@ -258,10 +423,13 @@ function navigateTo(page) {
     // Update page title
     const titles = {
         dashboard: 'Dashboard',
+        workspace: 'Workspace',
         pending: 'Pending Approvals',
         history: 'Command History',
+        dispatches: 'Shell Dispatches',
         rules: 'Policy Rules',
-        audit: 'Audit Log'
+        audit: 'Audit Log',
+        users: 'Users'
     };
     document.getElementById('page-title').textContent = titles[page] || page;
     
@@ -271,10 +439,13 @@ function navigateTo(page) {
     
     switch (page) {
         case 'dashboard': renderDashboard(container); break;
+        case 'workspace': renderWorkspace(container); break;
         case 'pending': renderPending(container); break;
         case 'history': renderHistory(container); break;
+        case 'dispatches': renderDispatches(container); break;
         case 'rules': renderRules(container); break;
         case 'audit': renderAudit(container); break;
+        case 'users': renderUsers(container); break;
     }
     
     // Start auto-refresh
@@ -348,10 +519,13 @@ function silentlyRefreshCurrentPage() {
     
     switch (state.currentPage) {
         case 'dashboard': renderDashboard(container); break;
+        case 'workspace': renderWorkspace(container); break;
         case 'pending': renderPending(container); break;
         case 'history': renderHistory(container); break;
+        case 'dispatches': renderDispatches(container); break;
         case 'rules': renderRules(container); break;
         case 'audit': renderAudit(container); break;
+        case 'users': renderUsers(container); break;
     }
     updatePendingBadge();
 }
@@ -517,25 +691,26 @@ function updateConnectionStatus(connected) {
 
 function handleWebSocketMessage(msg) {
     const { type, data } = msg;
+    const commandLine = buildCommandLineDisplay(data);
     
     switch (type) {
         case 'command_submitted':
             updatePendingBadge();
-            showNotification(`New command: ${data.command}`, 'info');
+            showNotification(`New command: ${commandLine || data.command}`, 'info');
             break;
         case 'command_approved':
             updatePendingBadge();
-            showNotification(`Command approved: ${data.command}`, 'success');
+            showNotification(`Command approved: ${commandLine || data.command}`, 'success');
             break;
         case 'command_rejected':
             updatePendingBadge();
-            showNotification(`Command rejected: ${data.command}`, 'error');
+            showNotification(`Command rejected: ${commandLine || data.command}`, 'error');
             break;
         case 'command_completed':
-            showNotification(`Command completed: ${data.command}`, 'success');
+            showNotification(`Command completed: ${commandLine || data.command}`, 'success');
             break;
         case 'command_failed':
-            showNotification(`Command failed: ${data.command}`, 'error');
+            showNotification(`Command failed: ${commandLine || data.command}`, 'error');
             break;
         case 'command_timeout':
             updatePendingBadge();
@@ -806,12 +981,15 @@ let currentApprovalCommandId = null;
 function openApprovalModal(commandId, command, riskLevel) {
     currentApprovalCommandId = commandId;
     document.getElementById('approval-modal').style.display = 'flex';
-    document.getElementById('approval-command-detail').textContent = command;
+    document.getElementById('approval-command-detail').innerHTML = '<div class="text-sm text-muted">Loading command context...</div>';
     document.getElementById('approval-rationale').value = '';
     
     const requiresRationale = riskLevel === 'HIGH';
     document.getElementById('approval-modal-title').textContent =
         requiresRationale ? 'Approve Command (Rationale Required)' : 'Approve Command';
+    document.getElementById('approve-btn').disabled = false;
+    document.getElementById('reject-btn').disabled = false;
+    loadApprovalContext(commandId, command, riskLevel);
 }
 
 function closeApprovalModal() {
@@ -837,10 +1015,10 @@ async function processApproval(decision) {
         const result = await response.json();
         
         if (response.ok) {
-            showNotification(
-                decision === 'approve' ? 'Command approved' : 'Command rejected',
-                decision === 'approve' ? 'success' : 'warning'
-            );
+            const message = decision === 'approve'
+                ? (result.fullyApproved ? 'Command approved' : 'Approval recorded, still pending')
+                : 'Command rejected';
+            showNotification(message, decision === 'approve' ? 'success' : 'warning');
             closeApprovalModal();
             navigateTo(state.currentPage);
         } else {
@@ -880,4 +1058,137 @@ function escapeHtml(text) {
 
 function parseArgsInput(argsStr) {
     return argsStr ? argsStr.split(',').map(arg => arg.trim()).filter(Boolean) : [];
+}
+
+function buildCommandLineDisplay(record) {
+    if (!record) return '';
+    if (typeof record === 'string') return record.trim();
+
+    const command = String(record.command || '').trim();
+    const args = Array.isArray(record.args)
+        ? record.args.map(arg => String(arg || '').trim()).filter(Boolean)
+        : [];
+
+    return [command, ...args].filter(Boolean).join(' ').trim();
+}
+
+async function loadApprovalContext(commandId, fallbackCommand, fallbackRiskLevel) {
+    try {
+        const response = await apiFetch(`/commands/${commandId}`);
+        const command = await response.json();
+        if (!response.ok) {
+            throw new Error(command.error || 'Failed to load command');
+        }
+
+        renderApprovalContext(command);
+    } catch (error) {
+        document.getElementById('approval-command-detail').innerHTML = `
+            <div class="command-detail">
+                <div><strong>Command:</strong> <code>${escapeHtml(fallbackCommand || '')}</code></div>
+                <div><strong>Risk:</strong> ${escapeHtml(fallbackRiskLevel || 'UNKNOWN')}</div>
+                <div class="text-sm text-muted" style="margin-top:8px">${escapeHtml(error.message || 'Failed to load approval context')}</div>
+            </div>
+        `;
+    }
+}
+
+function renderApprovalContext(command) {
+    const detail = document.getElementById('approval-command-detail');
+    const blockReason = getApprovalBlockReason(command);
+    const approvedBy = Array.isArray(command.approvedBy) ? command.approvedBy : [];
+    detail.innerHTML = `
+        <div class="command-detail">
+            <div style="margin-bottom:10px"><strong>Command:</strong> <code>${escapeHtml(buildCommandLineDisplay(command))}</code></div>
+            <div style="margin-bottom:8px"><strong>Requester:</strong> ${escapeHtml(command.requester)}</div>
+            <div style="margin-bottom:8px"><strong>Risk:</strong> <span class="risk-badge ${String(command.risk_level || 'medium').toLowerCase()}">${escapeHtml(command.risk_level || 'MEDIUM')}</span></div>
+            <div style="margin-bottom:8px"><strong>Progress:</strong> ${escapeHtml(formatApprovalProgress(command))}</div>
+            <div style="margin-bottom:8px"><strong>Approved by:</strong> ${approvedBy.length > 0 ? escapeHtml(approvedBy.join(', ')) : 'No approvals yet'}</div>
+            ${command.rejectedBy ? `<div style="margin-bottom:8px"><strong>Rejected by:</strong> ${escapeHtml(command.rejectedBy)}</div>` : ''}
+            ${command.timeout_at ? `<div style="margin-bottom:8px"><strong>Approval window:</strong> ${escapeHtml(formatTimeout(command.timeout_at))}</div>` : ''}
+            ${command.approvalProgress && !command.approvalProgress.twoPersonSatisfied ? '<div class="text-sm text-muted" style="margin-top:10px">Waiting for one more distinct approver to satisfy the two-person rule.</div>' : ''}
+            ${blockReason ? `<div class="text-sm text-muted" style="margin-top:10px;color:var(--accent-red)">${escapeHtml(blockReason)}</div>` : ''}
+        </div>
+    `;
+
+    document.getElementById('approve-btn').disabled = Boolean(blockReason);
+    document.getElementById('reject-btn').disabled = Boolean(blockReason);
+}
+
+function updateNavigationForPrincipal() {
+    document.querySelectorAll('.nav-link').forEach(link => {
+        const adminOnly = link.dataset.adminOnly === 'true';
+        link.style.display = !adminOnly || isAdminPrincipal(state.principal) ? '' : 'none';
+    });
+}
+
+function getAllowedPages(principal) {
+    if (!principal) {
+        return ['dashboard'];
+    }
+
+    return isAdminPrincipal(principal) ? [...ALL_PAGES] : [...DEFAULT_USER_PAGES];
+}
+
+function isAdminPrincipal(principal) {
+    return Boolean(principal && Array.isArray(principal.roles) && principal.roles.includes('admin'));
+}
+
+function describePrincipal(principal) {
+    if (!principal) {
+        return 'Not signed in';
+    }
+
+    const label = principal.displayName || principal.identifier;
+    const roles = Array.isArray(principal.roles) ? principal.roles : [];
+    const context = roles.includes('admin')
+        ? 'admin'
+        : (roles.includes('approver') ? 'approver' : principal.type);
+    return `${label} · ${context}`;
+}
+
+function getApprovalBlockReason(command) {
+    if (!state.principal) {
+        return 'Sign in to review this command.';
+    }
+
+    if (command.status && command.status !== 'pending') {
+        return `Command is ${command.status}, not pending.`;
+    }
+
+    if (command.requester === state.principal.identifier) {
+        return 'Requester cannot approve their own command.';
+    }
+
+    const capabilities = state.principal.approvalCapabilities || {};
+    if (command.risk_level === 'HIGH' && !capabilities.canApproveHigh) {
+        return 'You are not authorized for HIGH risk.';
+    }
+
+    if (command.risk_level === 'MEDIUM' && !(capabilities.canApproveMedium || capabilities.canApproveHigh)) {
+        return 'You are not authorized for MEDIUM risk.';
+    }
+
+    if (Array.isArray(command.approvedBy) && command.approvedBy.includes(state.principal.identifier)) {
+        return 'You have already approved this command.';
+    }
+
+    if (command.rejectedBy === state.principal.identifier) {
+        return 'You have already reviewed this command.';
+    }
+
+    return '';
+}
+
+function formatApprovalProgress(command) {
+    const progress = command.approvalProgress || {
+        count: Number(command.approval_count || 0),
+        required: Number(command.required_approvals || 0),
+        remaining: Math.max(0, Number(command.required_approvals || 0) - Number(command.approval_count || 0)),
+        twoPersonSatisfied: command.risk_level !== 'HIGH'
+    };
+    const base = `${progress.count}/${progress.required} approvals`;
+    if (command.risk_level === 'HIGH' && !progress.twoPersonSatisfied) {
+        return `${base} · waiting for distinct approver`;
+    }
+    return progress.remaining > 0 ? `${base} · ${progress.remaining} remaining` : `${base} · ready`;
 }

@@ -4,7 +4,10 @@ Use this guide if you want the fastest path from clone to a working Niyam dashbo
 
 Related docs:
 
+- [Individual setup](./individual_setup.md)
+- [Team setup](./team_setup.md)
 - [Usage guide](./usage.md)
+- [CLI wrapper](./cli_wrapper.md)
 - [Feature guide](./features.md)
 - [API reference](./api_reference.md)
 - [Configuration reference](./configuration.md)
@@ -18,6 +21,8 @@ By the end of this guide you will be able to:
 
 - start Niyam locally
 - sign in to the dashboard
+- enable the CLI wrapper in a real shell
+- optionally turn on team mode
 - submit commands
 - create pending approvals that show up on the board
 - approve or reject them from the UI
@@ -162,9 +167,12 @@ The script will:
 
 - generate local secrets
 - write `.env.local`
+- optionally enable team mode
 - install dependencies
 - initialize the database
 - optionally start the server
+
+It can also open a second terminal with the CLI wrapper ready.
 
 If you already have `.env.local` and only want to start the app, run the same script and choose:
 
@@ -177,6 +185,12 @@ That mode:
 - starts Niyam immediately
 - streams logs to the terminal
 - writes a timestamped log file under `.local/logs/`
+
+If you want the full shell and identity workflow after setup, continue with:
+
+- [Individual setup](./individual_setup.md)
+- [Team setup](./team_setup.md)
+- [CLI wrapper](./cli_wrapper.md)
 
 ## Manual Start
 
@@ -202,7 +216,7 @@ For local development, this is a good baseline:
 
 ```bash
 export NIYAM_ADMIN_PASSWORD=change-me
-export NIYAM_AGENT_TOKENS='{"forger":"dev-token"}'
+export NIYAM_AGENT_TOKENS='{"niyam-agent":"dev-token"}'
 export NIYAM_METRICS_TOKEN=metrics-secret
 export NIYAM_EXEC_ALLOWED_ROOTS="$PWD"
 export NIYAM_EXEC_DEFAULT_MODE=DIRECT
@@ -214,7 +228,7 @@ PowerShell equivalent:
 
 ```powershell
 $env:NIYAM_ADMIN_PASSWORD = "change-me"
-$env:NIYAM_AGENT_TOKENS = '{"forger":"dev-token"}'
+$env:NIYAM_AGENT_TOKENS = '{"niyam-agent":"dev-token"}'
 $env:NIYAM_METRICS_TOKEN = "metrics-secret"
 $env:NIYAM_EXEC_ALLOWED_ROOTS = (Get-Location).Path
 $env:NIYAM_EXEC_DEFAULT_MODE = "DIRECT"

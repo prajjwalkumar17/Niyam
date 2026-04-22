@@ -139,6 +139,123 @@ function validateApprovalPayload(body) {
     };
 }
 
+function validateCliDispatchPayload(body) {
+    const value = isPlainObject(body) ? body : {};
+    const errors = [];
+    const normalized = {};
+
+    const rawCommand = typeof value.rawCommand === 'string' ? value.rawCommand : '';
+    if (!rawCommand.trim()) {
+        errors.push('Raw command is required');
+    } else if (rawCommand.length > 8192) {
+        errors.push('Raw command is too long');
+    } else {
+        normalized.rawCommand = rawCommand;
+    }
+
+    validateOptionalString(value, 'workingDir', normalized, errors, { maxLength: 1024 });
+    validateOptionalString(value, 'shell', normalized, errors, { maxLength: 64 });
+    validateOptionalString(value, 'sessionId', normalized, errors, { maxLength: 128 });
+    validateOptionalString(value, 'firstToken', normalized, errors, { maxLength: 512 });
+
+    if (Object.prototype.hasOwnProperty.call(value, 'firstTokenType')) {
+        const allowed = ['external', 'builtin', 'alias', 'function', 'keyword', 'unknown'];
+        if (!allowed.includes(value.firstTokenType)) {
+            errors.push('First token type is invalid');
+        } else {
+            normalized.firstTokenType = value.firstTokenType;
+        }
+    } else {
+        normalized.firstTokenType = 'unknown';
+    }
+
+    if (Object.prototype.hasOwnProperty.call(value, 'hasShellSyntax')) {
+        const normalizedBoolean = normalizeBooleanLike(value.hasShellSyntax);
+        if (normalizedBoolean === null) {
+            errors.push('Has shell syntax must be a boolean or 0/1');
+        } else {
+            normalized.hasShellSyntax = normalizedBoolean;
+        }
+    } else {
+        normalized.hasShellSyntax = false;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(value, 'interactiveHint')) {
+        const normalizedBoolean = normalizeBooleanLike(value.interactiveHint);
+        if (normalizedBoolean === null) {
+            errors.push('Interactive hint must be a boolean or 0/1');
+        } else {
+            normalized.interactiveHint = normalizedBoolean;
+        }
+    } else {
+        normalized.interactiveHint = false;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(value, 'metadata')) {
+        if (!isPlainObject(value.metadata)) {
+            errors.push('Metadata must be an object');
+        } else {
+            normalized.metadata = value.metadata;
+        }
+    } else {
+        normalized.metadata = {};
+    }
+
+    return {
+        valid: errors.length === 0,
+        errors,
+        value: normalized
+    };
+}
+
+function validateCliDispatchCompletionPayload(body) {
+    const value = isPlainObject(body) ? body : {};
+    const errors = [];
+    const normalized = {};
+
+    const exitCode = Number.parseInt(value.exitCode, 10);
+    if (!Number.isFinite(exitCode) || exitCode < 0 || exitCode > 255) {
+        errors.push('Exit code must be an integer between 0 and 255');
+    } else {
+        normalized.exitCode = exitCode;
+    }
+
+    const durationMs = Number.parseInt(value.durationMs, 10);
+    if (!Number.isFinite(durationMs) || durationMs < 0 || durationMs > 7 * 24 * 60 * 60 * 1000) {
+        errors.push('Duration must be a non-negative integer no greater than seven days');
+    } else {
+        normalized.durationMs = durationMs;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(value, 'signal')) {
+        if (value.signal !== null && typeof value.signal !== 'string') {
+            errors.push('Signal must be a string or null');
+        } else if (typeof value.signal === 'string' && value.signal.length > 64) {
+            errors.push('Signal is too long');
+        } else {
+            normalized.signal = typeof value.signal === 'string' ? value.signal.trim() : null;
+        }
+    } else {
+        normalized.signal = null;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(value, 'completedAt')) {
+        if (typeof value.completedAt !== 'string' || Number.isNaN(Date.parse(value.completedAt))) {
+            errors.push('Completed at must be an ISO timestamp');
+        } else {
+            normalized.completedAt = value.completedAt;
+        }
+    } else {
+        normalized.completedAt = new Date().toISOString();
+    }
+
+    return {
+        valid: errors.length === 0,
+        errors,
+        value: normalized
+    };
+}
+
 function validateRulePayload(body, options = {}) {
     const value = isPlainObject(body) ? body : {};
     const errors = [];
@@ -199,6 +316,145 @@ function validateRulePayload(body, options = {}) {
         } else {
             normalized.metadata = value.metadata;
         }
+    }
+
+    return {
+        valid: errors.length === 0,
+        errors,
+        value: normalized
+    };
+}
+
+function validateUserPayload(body, options = {}) {
+    const value = isPlainObject(body) ? body : {};
+    const errors = [];
+    const normalized = {};
+    const partial = Boolean(options.partial);
+
+    if (!partial) {
+        validateOptionalString(value, 'username', normalized, errors, { maxLength: 64, required: true });
+        if (normalized.username && !/^[A-Za-z0-9._-]+$/.test(normalized.username)) {
+            errors.push('Username may only contain letters, numbers, dots, underscores, and dashes');
+        }
+    }
+
+    if (!partial) {
+        if (typeof value.password !== 'string' || !value.password) {
+            errors.push('Password is required');
+        } else if (value.password.length > 4096) {
+            errors.push('Password is too long');
+        } else {
+            normalized.password = value.password;
+        }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(value, 'displayName')) {
+        if (value.displayName !== null && typeof value.displayName !== 'string') {
+            errors.push('Display name must be a string or null');
+        } else if (typeof value.displayName === 'string' && value.displayName.length > 128) {
+            errors.push('Display name is too long');
+        } else {
+            normalized.displayName = typeof value.displayName === 'string' ? value.displayName.trim() : null;
+        }
+    } else if (!partial) {
+        normalized.displayName = null;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(value, 'enabled')) {
+        const enabled = normalizeBooleanLike(value.enabled);
+        if (enabled === null) {
+            errors.push('Enabled must be a boolean or 0/1');
+        } else {
+            normalized.enabled = enabled;
+        }
+    } else if (!partial) {
+        normalized.enabled = true;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(value, 'roles')) {
+        if (!Array.isArray(value.roles) || !value.roles.every(role => typeof role === 'string')) {
+            errors.push('Roles must be an array of strings');
+        } else if (!value.roles.every(role => ['admin'].includes(role))) {
+            errors.push('Roles may only contain admin');
+        } else {
+            normalized.roles = value.roles.map(role => role.trim()).filter(Boolean);
+        }
+    } else if (!partial) {
+        normalized.roles = [];
+    }
+
+    if (Object.prototype.hasOwnProperty.call(value, 'approvalCapabilities')) {
+        if (!isPlainObject(value.approvalCapabilities)) {
+            errors.push('Approval capabilities must be an object');
+        } else {
+            const canApproveMedium = normalizeBooleanLike(value.approvalCapabilities.canApproveMedium);
+            const canApproveHigh = normalizeBooleanLike(value.approvalCapabilities.canApproveHigh);
+            if (canApproveMedium === null) {
+                errors.push('Approval capabilities.canApproveMedium must be a boolean or 0/1');
+            }
+            if (canApproveHigh === null) {
+                errors.push('Approval capabilities.canApproveHigh must be a boolean or 0/1');
+            }
+            if (canApproveMedium !== null && canApproveHigh !== null) {
+                normalized.approvalCapabilities = {
+                    canApproveMedium,
+                    canApproveHigh
+                };
+            }
+        }
+    } else if (!partial) {
+        normalized.approvalCapabilities = {
+            canApproveMedium: false,
+            canApproveHigh: false
+        };
+    }
+
+    return {
+        valid: errors.length === 0,
+        errors,
+        value: normalized
+    };
+}
+
+function validateUserPasswordPayload(body) {
+    const value = isPlainObject(body) ? body : {};
+    const errors = [];
+    const normalized = {};
+
+    if (typeof value.password !== 'string' || !value.password) {
+        errors.push('Password is required');
+    } else if (value.password.length > 4096) {
+        errors.push('Password is too long');
+    } else {
+        normalized.password = value.password;
+    }
+
+    return {
+        valid: errors.length === 0,
+        errors,
+        value: normalized
+    };
+}
+
+function validatePasswordChangePayload(body) {
+    const value = isPlainObject(body) ? body : {};
+    const errors = [];
+    const normalized = {};
+
+    if (typeof value.currentPassword !== 'string' || !value.currentPassword) {
+        errors.push('Current password is required');
+    } else if (value.currentPassword.length > 4096) {
+        errors.push('Current password is too long');
+    } else {
+        normalized.currentPassword = value.currentPassword;
+    }
+
+    if (typeof value.newPassword !== 'string' || !value.newPassword) {
+        errors.push('New password is required');
+    } else if (value.newPassword.length > 4096) {
+        errors.push('New password is too long');
+    } else {
+        normalized.newPassword = value.newPassword;
     }
 
     return {
@@ -269,6 +525,16 @@ function validateOptionalString(source, key, target, errors, options = {}) {
     target[key] = trimmed;
 }
 
+function normalizeBooleanLike(value) {
+    if ([true, 1, '1', 'true'].includes(value)) {
+        return true;
+    }
+    if ([false, 0, '0', 'false'].includes(value)) {
+        return false;
+    }
+    return null;
+}
+
 function readableKey(key) {
     return key.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
 }
@@ -276,8 +542,13 @@ function readableKey(key) {
 module.exports = {
     validationError,
     validateApprovalPayload,
+    validateCliDispatchCompletionPayload,
+    validateCliDispatchPayload,
     validateCommandPayload,
     validateLoginBody,
+    validatePasswordChangePayload,
     validatePackActionBody,
-    validateRulePayload
+    validateRulePayload,
+    validateUserPasswordPayload,
+    validateUserPayload
 };

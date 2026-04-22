@@ -45,6 +45,11 @@ function renderAudit(container) {
                     <option value="command_failed">Command Failed</option>
                     <option value="command_blocked">Command Blocked</option>
                     <option value="command_timeout">Command Timeout</option>
+                    <option value="cli_dispatch_created">CLI Dispatch Created</option>
+                    <option value="cli_dispatch_blocked">CLI Dispatch Blocked</option>
+                    <option value="cli_dispatch_linked_command">CLI Dispatch Linked</option>
+                    <option value="cli_dispatch_local_completed">CLI Local Completed</option>
+                    <option value="cli_dispatch_local_failed">CLI Local Failed</option>
                     <option value="approval_granted">Approval Granted</option>
                     <option value="rule_created">Rule Created</option>
                     <option value="rule_updated">Rule Updated</option>
@@ -52,6 +57,13 @@ function renderAudit(container) {
                     <option value="rule_pack_installed">Rule Pack Installed</option>
                     <option value="rule_pack_upgrade_previewed">Rule Pack Upgrade Previewed</option>
                     <option value="rule_pack_upgraded">Rule Pack Upgraded</option>
+                    <option value="signup_requested">Signup Requested</option>
+                    <option value="signup_approved">Signup Approved</option>
+                    <option value="signup_rejected">Signup Rejected</option>
+                    <option value="user_created">User Created</option>
+                    <option value="user_updated">User Updated</option>
+                    <option value="user_password_reset">User Password Reset</option>
+                    <option value="password_changed">Password Changed</option>
                 </select>
                 <input type="text" class="form-input" id="audit-actor-filter" placeholder="Filter by actor">
                 <input type="date" class="form-input" id="audit-start-date" title="Start date">
@@ -213,6 +225,11 @@ async function loadAuditLog() {
             command_failed: { icon: renderEventChip('ER', 'error'), class: 'event-rejected' },
             command_blocked: { icon: renderEventChip('BL', 'warning'), class: 'event-command_blocked' },
             command_timeout: { icon: renderEventChip('TM', 'warning'), class: '' },
+            cli_dispatch_created: { icon: renderEventChip('CD'), class: '' },
+            cli_dispatch_blocked: { icon: renderEventChip('CB', 'warning'), class: 'event-command_blocked' },
+            cli_dispatch_linked_command: { icon: renderEventChip('LK', 'approved'), class: 'event-approved' },
+            cli_dispatch_local_completed: { icon: renderEventChip('LC', 'approved'), class: 'event-approved' },
+            cli_dispatch_local_failed: { icon: renderEventChip('LF', 'error'), class: 'event-rejected' },
             approval_granted: { icon: renderEventChip('AP', 'approved'), class: 'event-approved' },
             rule_created: { icon: renderEventChip('RC'), class: '' },
             rule_updated: { icon: renderEventChip('RU'), class: '' },
@@ -220,12 +237,17 @@ async function loadAuditLog() {
             rule_pack_installed: { icon: renderEventChip('PK'), class: '' },
             rule_pack_upgrade_previewed: { icon: renderEventChip('PV'), class: '' },
             rule_pack_upgraded: { icon: renderEventChip('UP'), class: '' },
+            signup_requested: { icon: renderEventChip('SR'), class: '' },
+            signup_approved: { icon: renderEventChip('SA', 'approved'), class: 'event-approved' },
+            signup_rejected: { icon: renderEventChip('SX', 'rejected'), class: 'event-rejected' },
+            password_changed: { icon: renderEventChip('PW'), class: '' },
             exec_key_rotated: { icon: renderEventChip('KR', 'warning'), class: '' }
         };
         
         timeline.innerHTML = data.entries.map(entry => {
             const config = eventConfig[entry.event_type] || { icon: renderEventChip('EV'), class: '' };
             const detailsHtml = formatAuditDetails(entry);
+            const commandLine = formatAuditCommandLine(entry.details || {});
             
             return `
                 <div class="timeline-item fade-in ${config.class}">
@@ -233,6 +255,7 @@ async function loadAuditLog() {
                     <div class="timeline-title">
                         ${config.icon} ${formatEventType(entry.event_type)}
                         ${entry.entity_type ? `<span class="timeline-entity">· ${entry.entity_type}</span>` : ''}
+                        ${commandLine ? ` <code style="color:var(--accent-cyan)">${escapeHtml(commandLine)}</code>` : ''}
                         ${entry.redacted ? `<span class="status-badge rejected">Redacted</span>` : ''}
                     </div>
                     <div class="timeline-details">
@@ -255,13 +278,14 @@ async function loadAuditLog() {
 function formatAuditDetails(entry) {
     const details = entry.details || {};
     let html = '';
+    const commandLine = formatAuditCommandLine(details);
     
     if (entry.entity_id) {
         html += `<div><strong>Entity ID:</strong> <code style="color:var(--accent-cyan)">${escapeHtml(entry.entity_id)}</code></div>`;
     }
     
-    if (details.command) {
-        html += `<div><strong>Command:</strong> <code style="color:var(--accent-cyan)">${escapeHtml(details.command)}</code></div>`;
+    if (commandLine) {
+        html += `<div><strong>Command:</strong> <code style="color:var(--accent-cyan)">${escapeHtml(commandLine)}</code></div>`;
     }
     
     if (details.risk_level) {
@@ -288,6 +312,26 @@ function formatAuditDetails(entry) {
         html += `<div style="color:var(--accent-red)"><strong>Error:</strong> ${escapeHtml(details.error)}</div>`;
     }
     
+    if (details.route) {
+        html += `<div><strong>Route:</strong> ${escapeHtml(details.route)}</div>`;
+    }
+
+    if (details.shell) {
+        html += `<div><strong>Shell:</strong> ${escapeHtml(details.shell)}</div>`;
+    }
+
+    if (details.commandId) {
+        html += `<div><strong>Linked Command:</strong> <code style="color:var(--accent-cyan)">${escapeHtml(details.commandId)}</code></div>`;
+    }
+
+    if (details.durationMs !== undefined) {
+        html += `<div><strong>Duration:</strong> ${details.durationMs}ms</div>`;
+    }
+
+    if (details.exitCode !== undefined) {
+        html += `<div><strong>Exit Code:</strong> ${details.exitCode}</div>`;
+    }
+
     if (details.exit_code !== undefined) {
         html += `<div><strong>Exit Code:</strong> ${details.exit_code}</div>`;
     }
@@ -297,6 +341,18 @@ function formatAuditDetails(entry) {
     }
     
     return html;
+}
+
+function formatAuditCommandLine(details) {
+    if (!details || !details.command) {
+        return '';
+    }
+
+    const args = Array.isArray(details.args)
+        ? details.args.map(arg => String(arg || '').trim()).filter(Boolean)
+        : [];
+
+    return [String(details.command).trim(), ...args].filter(Boolean).join(' ').trim();
 }
 
 function renderAuditPagination(currentCount) {

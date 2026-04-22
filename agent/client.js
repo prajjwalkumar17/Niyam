@@ -6,9 +6,16 @@ const http = require('http');
 
 class AgentClient {
     constructor(options = {}) {
+        const hasExplicitAgentName = Object.prototype.hasOwnProperty.call(options, 'agentName');
+        const hasExplicitApiToken = Object.prototype.hasOwnProperty.call(options, 'apiToken');
+        const hasExplicitSessionCookie = Object.prototype.hasOwnProperty.call(options, 'sessionCookie');
+        const sessionCookie = hasExplicitSessionCookie ? options.sessionCookie : '';
         this.baseUrl = options.baseUrl || 'http://localhost:3000';
-        this.agentName = options.agentName || 'forger';
-        this.apiToken = options.apiToken || process.env.NIYAM_AGENT_TOKEN || '';
+        this.agentName = hasExplicitAgentName ? options.agentName : 'niyam-agent';
+        this.apiToken = hasExplicitApiToken
+            ? options.apiToken
+            : (sessionCookie ? '' : (process.env.NIYAM_AGENT_TOKEN || ''));
+        this.sessionCookie = sessionCookie;
         this.timeout = options.timeout || 10000;
     }
 
@@ -145,9 +152,82 @@ class AgentClient {
     }
 
     /**
+     * Create a shell dispatch record for interactive CLI governance.
+     * @param {Object} payload - CLI dispatch payload
+     * @returns {Promise<Object>} Dispatch response
+     */
+    async createCliDispatch(payload) {
+        return this._request('POST', '/api/cli/dispatches', payload);
+    }
+
+    /**
+     * Report completion for a local passthrough dispatch.
+     * @param {string} dispatchId - Dispatch ID
+     * @param {Object} payload - Completion payload
+     * @returns {Promise<Object>} Updated dispatch
+     */
+    async completeCliDispatch(dispatchId, payload) {
+        return this._request('POST', `/api/cli/dispatches/${dispatchId}/complete`, payload);
+    }
+
+    /**
+     * Returns the authenticated principal for the current token.
+     * @returns {Promise<Object>} Principal info
+     */
+    async getCurrentPrincipal() {
+        return this._request('GET', '/api/auth/me');
+    }
+
+    /**
+     * Returns the health payload for the current Niyam instance.
+     * @returns {Promise<Object>} Health info
+     */
+    async getHealth() {
+        return this._request('GET', '/api/health');
+    }
+
+    /**
+     * Authenticate as a local dashboard user and retain the session cookie.
+     * @param {string} username - Local username
+     * @param {string} password - Local password
+     * @returns {Promise<Object>} Auth response plus session cookie
+     */
+    async loginLocalUser(username, password) {
+        const response = await this._requestRaw('POST', '/api/auth/login', {
+            username,
+            password
+        });
+        const sessionCookie = extractSessionCookie(response.headers['set-cookie']);
+        if (!sessionCookie) {
+            throw new Error('Login succeeded but no session cookie was returned');
+        }
+
+        this.sessionCookie = sessionCookie;
+        return {
+            ...response.body,
+            sessionCookie
+        };
+    }
+
+    /**
+     * Logout the current local user session.
+     * @returns {Promise<Object>} Logout response
+     */
+    async logoutLocalUser() {
+        const response = await this._request('POST', '/api/auth/logout');
+        this.sessionCookie = '';
+        return response;
+    }
+
+    /**
      * Make an HTTP request
      */
-    _request(method, path, body = null) {
+    async _request(method, path, body = null) {
+        const response = await this._requestRaw(method, path, body);
+        return response.body;
+    }
+
+    _requestRaw(method, path, body = null) {
         return new Promise((resolve, reject) => {
             const url = new URL(path, this.baseUrl);
             const options = {
@@ -164,6 +244,9 @@ class AgentClient {
             if (this.apiToken) {
                 options.headers.Authorization = `Bearer ${this.apiToken}`;
             }
+            if (this.sessionCookie) {
+                options.headers.Cookie = this.sessionCookie;
+            }
             
             const req = http.request(options, (res) => {
                 let data = '';
@@ -172,9 +255,15 @@ class AgentClient {
                     try {
                         const parsed = JSON.parse(data);
                         if (res.statusCode >= 400) {
-                            reject(new Error(parsed.error || `HTTP ${res.statusCode}`));
+                            const error = new Error(parsed.error || `HTTP ${res.statusCode}`);
+                            error.statusCode = res.statusCode;
+                            reject(error);
                         } else {
-                            resolve(parsed);
+                            resolve({
+                                body: parsed,
+                                headers: res.headers,
+                                statusCode: res.statusCode
+                            });
                         }
                     } catch (e) {
                         reject(new Error(`Invalid response: ${data.substring(0, 200)}`));
@@ -182,10 +271,15 @@ class AgentClient {
                 });
             });
             
-            req.on('error', reject);
+            req.on('error', (error) => {
+                error.isReachabilityError = true;
+                reject(error);
+            });
             req.on('timeout', () => {
                 req.destroy();
-                reject(new Error('Request timeout'));
+                const error = new Error('Request timeout');
+                error.isReachabilityError = true;
+                reject(error);
             });
             
             if (body) {
@@ -199,6 +293,22 @@ class AgentClient {
     _sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
+}
+
+function extractSessionCookie(setCookieHeader) {
+    const values = Array.isArray(setCookieHeader) ? setCookieHeader : [setCookieHeader];
+    for (const value of values) {
+        if (!value) {
+            continue;
+        }
+
+        const [cookie] = String(value).split(';');
+        if (cookie && cookie.includes('=')) {
+            return cookie;
+        }
+    }
+
+    return '';
 }
 
 module.exports = AgentClient;

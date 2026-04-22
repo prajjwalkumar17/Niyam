@@ -2,22 +2,14 @@
  * Command API - Submission, status, and history endpoints
  */
 
-const { v4: uuidv4 } = require('uuid');
-const PolicyEngine = require('../policy/engine');
-const { calculateTimeout } = require('../policy/risk-classifier');
-const { config } = require('../config');
-const { encryptJson } = require('../security/crypto');
-const {
-    buildRedactionSummary,
-    redactAuditDetails,
-    redactCommandInput
-} = require('../security/redaction');
+const { redactCommandInput } = require('../security/redaction');
+const { logAudit } = require('../services/audit-log');
+const { persistCommandSubmission, prepareCommandSubmission } = require('../services/command-submissions');
+const { shapeCommandRecord } = require('../services/record-shaping');
 const { validateCommandPayload, validationError } = require('./validation');
-const { logger, maybeAlertForAuditEvent, metrics } = require('../observability');
 
 function createCommandsRouter(db, broadcast, hooks = {}) {
     const router = require('express').Router();
-    const policyEngine = new PolicyEngine(db);
 
     router.post('/', (req, res) => {
         const validation = validateCommandPayload(req.body);
@@ -25,24 +17,24 @@ function createCommandsRouter(db, broadcast, hooks = {}) {
             return validationError(res, validation.errors);
         }
         const { command, args, metadata, timeoutHours, workingDir } = validation.value;
-
-        const rawArgs = args;
-        const rawMetadata = metadata;
         const requester = req.principal.identifier;
         const requesterType = req.principal.type;
-        const now = new Date().toISOString();
-
-        const evaluation = policyEngine.evaluate(command, rawArgs);
-        const redactedInput = redactCommandInput({
+        const prepared = prepareCommandSubmission(db, {
             command,
-            args: rawArgs,
-            metadata: rawMetadata
+            args,
+            metadata
         });
+        const { evaluation, redactedInput } = prepared;
 
         if (!evaluation.allowed) {
+            const blockedInput = redactCommandInput({
+                command,
+                args,
+                metadata
+            });
             logAudit(db, 'command_blocked', 'command', null, requester, {
-                command: redactedInput.command,
-                args: redactedInput.args,
+                command: blockedInput.command,
+                args: blockedInput.args,
                 reason: evaluation.reason
             });
 
@@ -53,80 +45,20 @@ function createCommandsRouter(db, broadcast, hooks = {}) {
             });
         }
 
-        const commandId = uuidv4();
-        const timeoutAt = calculateTimeout(evaluation.riskLevel, timeoutHours);
-        const status = evaluation.autoApproved ? 'approved' : 'pending';
-        const redactionSummary = buildRedactionSummary(redactedInput.summary);
-
-        db.prepare(`
-            INSERT INTO commands (
-                id, command, args, requester, requester_type,
-                risk_level, status, created_at, updated_at,
-                timeout_at, approval_count, required_approvals,
-                rationale_required, metadata, working_dir, execution_mode,
-                redaction_summary, redacted, exec_command, exec_args, exec_metadata
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(
-            commandId,
-            redactedInput.command,
-            JSON.stringify(redactedInput.args),
+        const commandData = persistCommandSubmission({
+            db,
+            broadcast,
+            onApproved: hooks.onApproved,
             requester,
-            requesterType || 'agent',
-            evaluation.riskLevel,
-            status,
-            now,
-            now,
-            timeoutAt,
-            0,
-            evaluation.threshold.requiredApprovals,
-            evaluation.threshold.rationaleRequired ? 1 : 0,
-            JSON.stringify(redactedInput.metadata || {}),
-            workingDir || null,
-            evaluation.executionMode,
-            JSON.stringify(redactionSummary),
-            redactedInput.redacted ? 1 : 0,
-            encryptJson(command, config.EXEC_DATA_KEY),
-            encryptJson(rawArgs, config.EXEC_DATA_KEY),
-            encryptJson(rawMetadata, config.EXEC_DATA_KEY)
-        );
-
-        logAudit(db, 'command_submitted', 'command', commandId, requester, {
-            command: redactedInput.command,
-            args: redactedInput.args,
-            riskLevel: evaluation.riskLevel,
-            risk_level: evaluation.riskLevel,
-            executionMode: evaluation.executionMode,
-            autoApproved: evaluation.autoApproved,
-            matchedRules: evaluation.matchedRules.map(rule => rule.name)
+            requesterType,
+            command,
+            args,
+            metadata,
+            timeoutHours,
+            workingDir,
+            evaluation,
+            redactedInput
         });
-
-        const commandData = {
-            id: commandId,
-            command: redactedInput.command,
-            args: redactedInput.args,
-            requester,
-            riskLevel: evaluation.riskLevel,
-            executionMode: evaluation.executionMode,
-            status,
-            autoApproved: evaluation.autoApproved,
-            timeoutAt,
-            threshold: evaluation.threshold,
-            redacted: redactedInput.redacted,
-            redactionSummary
-        };
-
-        if (broadcast) {
-            broadcast('command_submitted', commandData);
-        }
-
-        if (evaluation.autoApproved) {
-            if (broadcast) {
-                broadcast('command_auto_approved', { id: commandId, command: redactedInput.command });
-            }
-            if (hooks.onApproved) {
-                hooks.onApproved(commandId);
-            }
-        }
 
         res.status(201).json(commandData);
     });
@@ -138,7 +70,9 @@ function createCommandsRouter(db, broadcast, hooks = {}) {
         }
 
         const shaped = shapeCommandRecord(cmd);
-        shaped.approvals = db.prepare('SELECT * FROM approvals WHERE command_id = ?').all(req.params.id);
+        const approvals = db.prepare('SELECT * FROM approvals WHERE command_id = ? ORDER BY created_at ASC').all(req.params.id);
+        shaped.approvals = approvals;
+        applyApprovalSummary(shaped, approvals);
         res.json(shaped);
     });
 
@@ -171,6 +105,7 @@ function createCommandsRouter(db, broadcast, hooks = {}) {
         params.push(limitVal, offsetVal);
 
         const commands = db.prepare(query).all(...params).map(shapeCommandRecord);
+        enrichCommandsWithApprovals(db, commands);
 
         let countQuery = 'SELECT COUNT(*) as total FROM commands WHERE 1=1';
         const countParams = [];
@@ -196,7 +131,7 @@ function createCommandsRouter(db, broadcast, hooks = {}) {
         });
     });
 
-    router.get('/stats/summary', (req, res) => {
+    router.get('/stats/summary', (_req, res) => {
         const stats = {
             total: db.prepare('SELECT COUNT(*) as count FROM commands').get().count,
             pending: db.prepare("SELECT COUNT(*) as count FROM commands WHERE status = 'pending'").get().count,
@@ -217,64 +152,53 @@ function createCommandsRouter(db, broadcast, hooks = {}) {
     return router;
 }
 
-function logAudit(db, eventType, entityType, entityId, actor, details) {
-    const auditRedaction = redactAuditDetails(details || {});
-
-    db.prepare(`
-        INSERT INTO audit_log (id, event_type, entity_type, entity_id, actor, details, redaction_summary, redacted, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-        uuidv4(),
-        eventType,
-        entityType,
-        entityId,
-        actor,
-        JSON.stringify(auditRedaction.details),
-        JSON.stringify(auditRedaction.summary),
-        auditRedaction.redacted ? 1 : 0,
-        new Date().toISOString()
-    );
-
-    logger.info('audit_event', {
-        eventType,
-        entityType,
-        entityId,
-        actor,
-        details: auditRedaction.details
-    });
-    metrics.incCounter('niyam_audit_events_total', {
-        event_type: eventType,
-        entity_type: entityType || 'unknown'
-    }, 1, 'Audit events');
-    maybeAlertForAuditEvent(eventType, actor, auditRedaction.details || {});
-}
-
-function shapeCommandRecord(record) {
-    const shaped = { ...record };
-    shaped.args = parseJson(shaped.args, []);
-    shaped.metadata = parseJson(shaped.metadata, {});
-    shaped.redaction_summary = parseJson(shaped.redaction_summary, {});
-    shaped.redacted = Boolean(shaped.redacted);
-    delete shaped.exec_command;
-    delete shaped.exec_args;
-    delete shaped.exec_metadata;
-    return shaped;
-}
-
-function parseJson(value, fallback) {
-    if (value === null || value === undefined || value === '') {
-        return fallback;
-    }
-
-    try {
-        return JSON.parse(value);
-    } catch (error) {
-        return fallback;
-    }
-}
-
 module.exports = {
-    createCommandsRouter,
-    logAudit,
-    shapeCommandRecord
+    createCommandsRouter
 };
+
+function enrichCommandsWithApprovals(db, commands) {
+    if (!Array.isArray(commands) || commands.length === 0) {
+        return;
+    }
+
+    const ids = commands.map(command => command.id);
+    const placeholders = ids.map(() => '?').join(', ');
+    const approvals = db.prepare(`
+        SELECT *
+        FROM approvals
+        WHERE command_id IN (${placeholders})
+        ORDER BY created_at ASC
+    `).all(...ids);
+
+    const approvalMap = new Map();
+    approvals.forEach(approval => {
+        if (!approvalMap.has(approval.command_id)) {
+            approvalMap.set(approval.command_id, []);
+        }
+        approvalMap.get(approval.command_id).push(approval);
+    });
+
+    commands.forEach(command => {
+        applyApprovalSummary(command, approvalMap.get(command.id) || []);
+    });
+}
+
+function applyApprovalSummary(command, approvals) {
+    const approvedBy = approvals
+        .filter(approval => approval.decision === 'approved')
+        .map(approval => approval.approver);
+    const rejectedDecision = approvals.find(approval => approval.decision === 'rejected');
+    const distinctApprovers = [...new Set(approvedBy.filter(approver => approver !== command.requester))];
+    const twoPersonSatisfied = command.risk_level !== 'HIGH' || distinctApprovers.length >= 2;
+    const approvalCount = approvedBy.length;
+
+    command.approvedBy = approvedBy;
+    command.rejectedBy = rejectedDecision ? rejectedDecision.approver : null;
+    command.approvalProgress = {
+        count: approvalCount,
+        required: Number(command.required_approvals || 0),
+        remaining: Math.max(0, Number(command.required_approvals || 0) - approvalCount),
+        twoPersonSatisfied
+    };
+    command.approval_count = approvalCount;
+}

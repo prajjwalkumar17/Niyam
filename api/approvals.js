@@ -3,7 +3,8 @@
  */
 
 const { v4: uuidv4 } = require('uuid');
-const { logAudit, shapeCommandRecord } = require('./commands');
+const { logAudit } = require('../services/audit-log');
+const { shapeCommandRecord } = require('../services/record-shaping');
 const { checkTwoPersonApproval, validateSeparateApprover } = require('../safety/two-person');
 const { validateRationale } = require('../safety/rationale');
 const { validateApprovalPayload, validationError } = require('./validation');
@@ -22,6 +23,7 @@ function createApprovalsRouter(db, broadcast, hooks = {}) {
         const approver = req.principal.identifier;
         
         const cmd = db.prepare('SELECT * FROM commands WHERE id = ?').get(commandId);
+        const shapedCmd = cmd ? shapeCommandRecord(cmd) : null;
         if (!cmd) {
             return res.status(404).json({ error: 'Command not found' });
         }
@@ -105,6 +107,8 @@ function createApprovalsRouter(db, broadcast, hooks = {}) {
             `).run(newCount, now, commandId);
             
             logAudit(db, 'command_approved', 'command', commandId, approver, {
+                command: shapedCmd.command,
+                args: shapedCmd.args,
                 approvalCount: newCount,
                 requiredApprovals: cmd.required_approvals,
                 approver,
@@ -112,7 +116,12 @@ function createApprovalsRouter(db, broadcast, hooks = {}) {
             });
             
             if (broadcast) {
-                broadcast('command_approved', { id: commandId, command: cmd.command, approvals: newCount });
+                broadcast('command_approved', {
+                    id: commandId,
+                    command: shapedCmd.command,
+                    args: shapedCmd.args,
+                    approvals: newCount
+                });
             }
             if (hooks.onApproved) {
                 hooks.onApproved(commandId);
@@ -123,6 +132,8 @@ function createApprovalsRouter(db, broadcast, hooks = {}) {
             `).run(newCount, now, commandId);
             
             logAudit(db, 'approval_granted', 'command', commandId, approver, {
+                command: shapedCmd.command,
+                args: shapedCmd.args,
                 approvalCount: newCount,
                 requiredApprovals: cmd.required_approvals,
                 approver,
@@ -161,6 +172,7 @@ function createApprovalsRouter(db, broadcast, hooks = {}) {
         const approver = req.principal.identifier;
         
         const cmd = db.prepare('SELECT * FROM commands WHERE id = ?').get(commandId);
+        const shapedCmd = cmd ? shapeCommandRecord(cmd) : null;
         if (!cmd) {
             return res.status(404).json({ error: 'Command not found' });
         }
@@ -208,12 +220,19 @@ function createApprovalsRouter(db, broadcast, hooks = {}) {
         `).run(new Date().toISOString(), commandId);
         
         logAudit(db, 'command_rejected', 'command', commandId, approver, {
+            command: shapedCmd.command,
+            args: shapedCmd.args,
             approver,
             rationale: rationale || 'No rationale provided'
         });
         
         if (broadcast) {
-            broadcast('command_rejected', { id: commandId, command: cmd.command, rejectedBy: approver });
+            broadcast('command_rejected', {
+                id: commandId,
+                command: shapedCmd.command,
+                args: shapedCmd.args,
+                rejectedBy: approver
+            });
         }
         
         res.json({

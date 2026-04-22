@@ -61,14 +61,15 @@ async function loadPendingPage() {
                             <span class="risk-badge ${cmd.risk_level.toLowerCase()}">${cmd.risk_level}</span>
                             <span class="status-badge pending">Pending</span>
                         </div>
-                        <div class="command-stream-title"><code>${escapeHtml(formatCommandLine(cmd))}</code></div>
-                        <div class="command-stream-subtitle">${escapeHtml(cmd.requester)} · ${timeAgo(cmd.created_at)} · ${cmd.approval_count}/${cmd.required_approvals} approvals</div>
+                        <div class="command-stream-title"><code>${escapeHtml(buildCommandLineDisplay(cmd))}</code></div>
+                        <div class="command-stream-subtitle">${escapeHtml(cmd.requester)} · ${timeAgo(cmd.created_at)} · ${escapeHtml(formatApprovalProgress(cmd))}</div>
                     </div>
                     <div class="command-stream-timer">${renderTimer(cmd.timeout_at, cmd.created_at, 'ring')}</div>
                 </div>
                 <div class="command-stream-meta-row">
                     <span class="command-stream-meta-pill">Requester · ${escapeHtml(cmd.requester)}</span>
-                    <span class="command-stream-meta-pill">Approvals · ${cmd.approval_count}/${cmd.required_approvals}</span>
+                    <span class="command-stream-meta-pill">Approvals · ${escapeHtml(formatApprovalProgress(cmd))}</span>
+                    <span class="command-stream-meta-pill">Approved By · ${escapeHtml((cmd.approvedBy || []).join(', ') || 'No approvals yet')}</span>
                     <span class="command-stream-meta-pill">Window · ${formatTimeout(cmd.timeout_at)}</span>
                     ${cmd.rationale_required ? '<span class="command-stream-meta-pill">Rationale required</span>' : ''}
                 </div>
@@ -76,7 +77,7 @@ async function loadPendingPage() {
                     <button class="btn btn-success btn-sm review-btn"
                         data-id="${cmd.id}"
                         data-risk="${cmd.risk_level}"
-                        data-command="${encodeURIComponent(cmd.command)}">Review Command</button>
+                        data-command="${encodeURIComponent(buildCommandLineDisplay(cmd))}">Review Command</button>
                 </div>
             </article>
         `).join('');
@@ -109,9 +110,4 @@ function isExpiringSoon(isoString) {
     if (!isoString) return false;
     const diff = new Date(isoString) - new Date();
     return diff > 0 && diff < 3600000; // Less than 1 hour
-}
-
-function formatCommandLine(cmd) {
-    const args = Array.isArray(cmd.args) ? cmd.args.filter(Boolean) : [];
-    return [cmd.command, ...args].join(' ').trim();
 }

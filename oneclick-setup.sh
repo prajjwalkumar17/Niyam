@@ -25,9 +25,11 @@ RUN_GROUP=""
 SHOULD_START="n"
 SHOULD_RENDER="n"
 SHOULD_STAGE="n"
+SHOULD_OPEN_CLI_TERMINAL="n"
 BACKUP_PASSPHRASE=""
 REUSE_EXISTING_ENV="n"
 START_ONLY="n"
+TEAM_MODE="n"
 
 bold() {
     printf '\033[1m%s\033[0m\n' "$1"
@@ -59,6 +61,56 @@ random_secret() {
 
 timestamp_for_path() {
     date '+%Y-%m-%dT%H-%M-%S'
+}
+
+detect_cli_shell() {
+    local shell_name
+    shell_name=$(basename "${SHELL:-zsh}")
+    case "$shell_name" in
+        zsh|bash) printf '%s' "$shell_name" ;;
+        *) printf 'zsh' ;;
+    esac
+}
+
+shell_rc_path() {
+    local shell_name=${1:-zsh}
+    case "$shell_name" in
+        bash) printf '%s/.bashrc' "$HOME" ;;
+        *) printf '%s/.zshrc' "$HOME" ;;
+    esac
+}
+
+can_open_cli_terminal() {
+    [[ "$(uname -s)" == "Darwin" ]] || return 1
+    command -v osascript >/dev/null 2>&1 || return 1
+}
+
+escape_applescript_string() {
+    local value=$1
+    value=${value//\\/\\\\}
+    value=${value//\"/\\\"}
+    printf '%s' "$value"
+}
+
+open_cli_wrapper_terminal() {
+    if [[ "$SHOULD_OPEN_CLI_TERMINAL" != "y" ]]; then
+        return 0
+    fi
+
+    if ! can_open_cli_terminal; then
+        warn "Automatic terminal launch is not available on this machine"
+        return 1
+    fi
+
+    local shell_name rc_path command
+    shell_name=$(detect_cli_shell)
+    rc_path=$(shell_rc_path "$shell_name")
+    command="cd $(shell_quote "$ROOT_DIR"); npm run cli:install -- --shell $shell_name; source $(shell_quote "$rc_path"); printf '\nNiyam CLI wrapper ready in this terminal.\n'"
+
+    osascript -e "tell application \"Terminal\" to activate" \
+        -e "tell application \"Terminal\" to do script \"$(escape_applescript_string "$command")\"" >/dev/null
+
+    info "Opened a new Terminal window with the Niyam CLI wrapper setup"
 }
 
 listening_pids_on_port() {
@@ -210,6 +262,79 @@ normalize_exec_mode() {
     esac
 }
 
+env_flag_to_yes_no() {
+    case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
+        1|true|yes|on) printf 'y' ;;
+        *) printf 'n' ;;
+    esac
+}
+
+team_mode_env_value() {
+    if [[ "$TEAM_MODE" == "y" ]]; then
+        printf 'true'
+    else
+        printf 'false'
+    fi
+}
+
+prompt_team_mode_setting() {
+    TEAM_MODE=$(prompt_yes_no "Activate team mode (self-signup requests + admin approval)?" "${1:-n}")
+}
+
+apply_team_mode_to_env_file() {
+    local target=$1
+    local temp_file
+    temp_file=$(mktemp)
+
+    awk -v value="$(team_mode_env_value)" '
+        BEGIN { updated = 0 }
+        /^NIYAM_ENABLE_SELF_SIGNUP=/ {
+            print "NIYAM_ENABLE_SELF_SIGNUP=" value
+            updated = 1
+            next
+        }
+        { print }
+        END {
+            if (!updated) {
+                print "NIYAM_ENABLE_SELF_SIGNUP=" value
+            }
+        }
+    ' "$target" > "$temp_file"
+
+    mv "$temp_file" "$target"
+}
+
+sync_runtime_metadata_to_env_file() {
+    local target=$1
+    local temp_file
+    temp_file=$(mktemp)
+
+    awk -v profile="$PROFILE" -v env_file="$target" '
+        BEGIN { profile_updated = 0; env_updated = 0 }
+        /^NIYAM_PROFILE=/ {
+            print "NIYAM_PROFILE=" profile
+            profile_updated = 1
+            next
+        }
+        /^NIYAM_ENV_FILE=/ {
+            print "NIYAM_ENV_FILE='\''" env_file "'\''"
+            env_updated = 1
+            next
+        }
+        { print }
+        END {
+            if (!profile_updated) {
+                print "NIYAM_PROFILE=" profile
+            }
+            if (!env_updated) {
+                print "NIYAM_ENV_FILE='\''" env_file "'\''"
+            }
+        }
+    ' "$target" > "$temp_file"
+
+    mv "$temp_file" "$target"
+}
+
 load_existing_env() {
     set -a
     # shellcheck disable=SC1090
@@ -228,16 +353,80 @@ load_existing_env() {
     ADMIN_PASSWORD=${NIYAM_ADMIN_PASSWORD:-$ADMIN_PASSWORD}
     EXEC_DATA_KEY=${NIYAM_EXEC_DATA_KEY:-$EXEC_DATA_KEY}
     METRICS_TOKEN=${NIYAM_METRICS_TOKEN:-$METRICS_TOKEN}
+    TEAM_MODE=$(env_flag_to_yes_no "${NIYAM_ENABLE_SELF_SIGNUP:-}")
 }
 
 print_dashboard_access() {
     printf 'Dashboard access:\n'
     printf '  URL: http://localhost:%s\n' "$PORT"
     printf '  Username: %s\n' "$ADMIN_USERNAME"
+    if [[ "$TEAM_MODE" == "y" ]]; then
+        printf '  Team mode: enabled (self-signup requests require admin approval)\n'
+    else
+        printf '  Team mode: disabled (admin-created users only)\n'
+    fi
     if [[ -n "$ADMIN_PASSWORD" ]]; then
         printf '  Password: %s\n' "$ADMIN_PASSWORD"
     fi
     printf '  Password source: %s (NIYAM_ADMIN_PASSWORD)\n' "$ENV_FILE"
+    printf '\n'
+}
+
+print_cli_wrapper_instructions() {
+    printf 'To enable the CLI wrapper in another terminal:\n'
+    printf '  cd %s\n' "$ROOT_DIR"
+    printf '  npm run cli:install\n'
+    printf '  source ~/.zshrc\n'
+    printf '\n'
+    printf 'Quick toggle commands after install:\n'
+    printf '  niyam-off\n'
+    printf '  niyam-on\n'
+    printf '\n'
+    printf 'To fully uninstall the CLI wrapper later:\n'
+    printf '  cd %s\n' "$ROOT_DIR"
+    printf '  npm run cli:remove\n'
+    printf '  source ~/.zshrc\n'
+    printf '\n'
+    printf 'To remove the CLI wrapper from the current shell only:\n'
+    printf '  niyam-off\n'
+}
+
+suggest_shared_base_url() {
+    local first_origin
+
+    if [[ -n "$ALLOWED_ORIGINS" ]]; then
+        first_origin=${ALLOWED_ORIGINS%%,*}
+        first_origin=$(printf '%s' "$first_origin" | xargs)
+        case "$first_origin" in
+            http://127.0.0.1:*|http://localhost:*|https://127.0.0.1:*|https://localhost:*)
+                ;;
+            http://*|https://*)
+                printf '%s' "$first_origin"
+                return
+                ;;
+        esac
+    fi
+
+    if [[ -n "$DOMAIN" ]]; then
+        printf 'https://%s' "$DOMAIN"
+        return
+    fi
+
+    printf 'http://<server-host>:%s' "$PORT"
+}
+
+print_multi_machine_wrapper_instructions() {
+    local shared_base_url
+    shared_base_url=$(suggest_shared_base_url)
+
+    printf 'For other developer machines using this same Niyam server:\n'
+    printf '  - Niyam must be reachable over the network; localhost only works on this machine.\n'
+    printf '  - On each developer machine, in that machine'"'"'s Niyam checkout:\n'
+    printf '      export NIYAM_CLI_BASE_URL=%s\n' "$(shell_quote "$shared_base_url")"
+    printf '      npm run cli:install\n'
+    printf '      source ~/.zshrc\n'
+    printf '      node bin/niyam-cli.js login --username <user> --password <password>\n'
+    printf '  - Commands from that shell will then appear in this dashboard as that signed-in user.\n'
     printf '\n'
 }
 
@@ -254,7 +443,7 @@ print_local_notes() {
 print_selfhost_notes() {
     bold "Self-hosted setup notes"
     printf '  - Admin password: dashboard operator login\n'
-    printf '  - Agent token: bearer token for the default "forger" agent\n'
+    printf '  - Agent token: bearer token for the default "niyam-agent" agent\n'
     printf '  - Execution data key: must stay stable for pending encrypted command payloads\n'
     printf '  - Metrics token: protects Prometheus-style metrics access\n'
     printf '  - Wrapper JSON array: isolation command used when rules force WRAPPER\n'
@@ -267,6 +456,8 @@ write_env_file() {
 
     cat > "$target" <<EOF
 NODE_ENV=$(shell_quote "$( [[ "$PROFILE" == "local" ]] && printf 'development' || printf 'production' )")
+NIYAM_PROFILE=$(shell_quote "$PROFILE")
+NIYAM_ENV_FILE=$(shell_quote "$target")
 NIYAM_PORT=$(shell_quote "$PORT")
 NIYAM_ADMIN_USERNAME=admin
 NIYAM_ADMIN_IDENTIFIER=admin
@@ -274,7 +465,8 @@ NIYAM_ADMIN_PASSWORD=$(shell_quote "$ADMIN_PASSWORD")
 NIYAM_DATA_DIR=$(shell_quote "$DATA_DIR")
 NIYAM_DB=$(shell_quote "$DB_PATH")
 NIYAM_ALLOWED_ORIGINS=$(shell_quote "$ALLOWED_ORIGINS")
-NIYAM_AGENT_TOKENS=$(shell_quote "{\"forger\":\"$AGENT_TOKEN\"}")
+NIYAM_AGENT_TOKENS=$(shell_quote "{\"niyam-agent\":\"$AGENT_TOKEN\"}")
+NIYAM_ENABLE_SELF_SIGNUP=$(team_mode_env_value)
 NIYAM_SESSION_TTL_HOURS=12
 NIYAM_SESSION_CLEANUP_INTERVAL_MS=300000
 NIYAM_LOG_LEVEL=info
@@ -301,6 +493,13 @@ NIYAM_REDACTION_REPLACEMENT=[REDACTED]
 NIYAM_REDACTION_EXTRA_KEYS=token,password,secret,api_key
 NIYAM_REDACTION_DISABLE_HEURISTICS=false
 EOF
+
+    if [[ "$PROFILE" == "local" ]]; then
+        cat >> "$target" <<EOF
+NIYAM_CLI_BASE_URL=$(shell_quote "http://127.0.0.1:$PORT")
+NIYAM_CLI_REQUESTER=niyam-agent
+EOF
+    fi
 }
 
 run_npm_install() {
@@ -317,6 +516,8 @@ initialize_database() {
     info "Initializing database at $DB_PATH"
     (
         set -a
+        export NIYAM_PROFILE="$PROFILE"
+        export NIYAM_ENV_FILE="$ENV_FILE"
         # shellcheck disable=SC1090
         source "$ENV_FILE"
         set +a
@@ -333,8 +534,11 @@ start_server() {
     info "Starting Niyam with $ENV_FILE"
     info "Dashboard will be available at http://localhost:$PORT"
     print_dashboard_access
+    open_cli_wrapper_terminal || true
     (
         set -a
+        export NIYAM_PROFILE="$PROFILE"
+        export NIYAM_ENV_FILE="$ENV_FILE"
         # shellcheck disable=SC1090
         source "$ENV_FILE"
         set +a
@@ -359,6 +563,9 @@ start_server_with_logs() {
     info "Starting Niyam from $ENV_FILE"
     info "Streaming logs to terminal and $log_file"
     print_dashboard_access
+    print_cli_wrapper_instructions
+    print_multi_machine_wrapper_instructions
+    open_cli_wrapper_terminal || true
     (
         set -a
         # shellcheck disable=SC1090
@@ -409,12 +616,16 @@ print_summary() {
     printf 'Data dir: %s\n' "$DATA_DIR"
     printf 'Allowed roots: %s\n' "$EXEC_ALLOWED_ROOTS"
     printf 'Execution mode: %s\n' "$EXEC_DEFAULT_MODE"
+    printf 'Team mode: %s\n' "$( [[ "$TEAM_MODE" == "y" ]] && printf 'enabled' || printf 'disabled' )"
     printf '\n'
     print_dashboard_access
 
     if [[ "$PROFILE" == "local" ]]; then
         printf 'To start later:\n'
         printf '  set -a; source %s; set +a; npm start\n' "$ENV_FILE"
+        printf '\n'
+        print_cli_wrapper_instructions
+        print_multi_machine_wrapper_instructions
     else
         printf 'Deploy artifacts:\n'
         printf '  .deploy/niyam.env\n'
@@ -422,14 +633,17 @@ print_summary() {
         printf '  .deploy/niyam-backup.service\n'
         printf '  .deploy/niyam-backup.timer\n'
         printf '  .deploy/Caddyfile\n'
+        printf '\n'
+        print_cli_wrapper_instructions
+        print_multi_machine_wrapper_instructions
     fi
 }
 
 select_profile() {
     bold "Niyam one-click setup"
-    printf '1. Local development\n'
-    printf '2. Self-hosted prep\n'
-    printf '3. Start existing server env and stream logs\n'
+    printf '1. Local development (single-user or team mode)\n'
+    printf '2. Self-hosted prep (single-user or team mode)\n'
+    printf '3. Start existing server env and stream logs (single-user or team mode)\n'
     printf '\n'
 
     local answer
@@ -462,6 +676,9 @@ configure_start_only() {
 
     DATA_DIR="$ROOT_DIR/.local/niyam"
     load_existing_env
+    if can_open_cli_terminal; then
+        SHOULD_OPEN_CLI_TERMINAL=$(prompt_yes_no "Open a second Terminal with the Niyam CLI wrapper ready?" "y")
+    fi
 }
 
 configure_local() {
@@ -477,7 +694,7 @@ configure_local() {
     DATA_DIR=$(prompt_with_default "Local data directory" "$ROOT_DIR/.local/niyam")
     DB_PATH="$DATA_DIR/niyam.db"
     ALLOWED_ORIGINS=$(prompt_with_default "Allowed browser origins" "http://localhost:$PORT")
-    EXEC_ALLOWED_ROOTS=$(prompt_with_default "Execution allowed roots" "$ROOT_DIR")
+    EXEC_ALLOWED_ROOTS=$(prompt_with_default "Execution allowed roots" "$HOME")
     EXEC_DEFAULT_MODE=$(normalize_exec_mode "$(prompt_with_default "Default execution mode (DIRECT or WRAPPER)" "DIRECT")")
     if [[ "$EXEC_DEFAULT_MODE" == "WRAPPER" ]]; then
         EXEC_WRAPPER=$(prompt_with_default "Wrapper JSON array" '["/usr/bin/env"]')
@@ -486,11 +703,14 @@ configure_local() {
     fi
     BACKUP_DIR=$(prompt_with_default "Backup directory" "$DATA_DIR/backups")
     ADMIN_PASSWORD=$(prompt_secret "Admin password (dashboard login)" "$generated_admin")
-    AGENT_TOKEN=$(prompt_secret "Agent token for \"forger\" (Bearer token)" "$generated_agent")
+    AGENT_TOKEN=$(prompt_secret "Agent token for \"niyam-agent\" (Bearer token)" "$generated_agent")
     EXEC_DATA_KEY=$(prompt_secret "Execution data key (encrypts stored raw command payloads)" "$generated_exec")
     METRICS_TOKEN=$(prompt_secret "Metrics token (/api/metrics access)" "$generated_metrics")
     ENV_FILE="$ROOT_DIR/.env.local"
     SHOULD_START=$(prompt_yes_no "Start the server when setup finishes?" "y")
+    if can_open_cli_terminal; then
+        SHOULD_OPEN_CLI_TERMINAL=$(prompt_yes_no "Open a second Terminal with the Niyam CLI wrapper ready?" "y")
+    fi
 }
 
 configure_selfhost() {
@@ -519,7 +739,7 @@ configure_selfhost() {
     fi
     BACKUP_DIR=$(prompt_with_default "Backup directory" "/var/backups/niyam")
     ADMIN_PASSWORD=$(prompt_secret "Admin password (dashboard login)" "$generated_admin")
-    AGENT_TOKEN=$(prompt_secret "Agent token for \"forger\" (Bearer token)" "$generated_agent")
+    AGENT_TOKEN=$(prompt_secret "Agent token for \"niyam-agent\" (Bearer token)" "$generated_agent")
     EXEC_DATA_KEY=$(prompt_secret "Execution data key (encrypts stored raw command payloads)" "$generated_exec")
     METRICS_TOKEN=$(prompt_secret "Metrics token (/api/metrics access)" "$generated_metrics")
     ENV_FILE="$ROOT_DIR/.deploy/niyam.env"
@@ -543,6 +763,9 @@ main() {
     fi
 
     if [[ "$START_ONLY" == "y" ]]; then
+        prompt_team_mode_setting "$TEAM_MODE"
+        apply_team_mode_to_env_file "$ENV_FILE"
+        sync_runtime_metadata_to_env_file "$ENV_FILE"
         start_server_with_logs "$ROOT_DIR/.local/logs"
         exit 0
     fi
@@ -560,9 +783,14 @@ main() {
         fi
     fi
 
+    prompt_team_mode_setting "$TEAM_MODE"
+
     if [[ "$REUSE_EXISTING_ENV" != "y" ]]; then
         write_env_file "$ENV_FILE"
+    else
+        apply_team_mode_to_env_file "$ENV_FILE"
     fi
+    sync_runtime_metadata_to_env_file "$ENV_FILE"
     mkdir -p "$DATA_DIR" "$BACKUP_DIR"
     if [[ ! -f "$DATA_DIR/backup-passphrase" ]]; then
         BACKUP_PASSPHRASE=$(random_secret)
@@ -581,6 +809,10 @@ main() {
     fi
 
     print_summary
+
+    if [[ "$PROFILE" == "local" && "$SHOULD_START" != "y" && "$SHOULD_OPEN_CLI_TERMINAL" == "y" ]]; then
+        open_cli_wrapper_terminal || true
+    fi
 
     if [[ "$PROFILE" == "local" && "$SHOULD_START" == "y" ]]; then
         printf '\n'

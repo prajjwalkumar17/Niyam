@@ -5,10 +5,11 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
-const { logAudit } = require('../api/commands');
+const { logAudit } = require('../services/audit-log');
 const { config } = require('../config');
 const { decryptJson } = require('../security/crypto');
 const { buildRedactionSummary, redactExecutionOutput } = require('../security/redaction');
+const { tokenizeCommand } = require('../lib/command-line');
 const { logger, metrics } = require('../observability');
 
 class CommandRunner {
@@ -87,6 +88,8 @@ class CommandRunner {
             );
             
             logAudit(this.db, 'command_executed', 'command', commandId, 'system', {
+                command: cmd.command,
+                args: parseJson(cmd.args, []),
                 exitCode: result.exitCode,
                 outputLength: (result.stdout || '').length
             });
@@ -107,6 +110,7 @@ class CommandRunner {
                 this.broadcast('command_completed', {
                     id: commandId,
                     command: cmd.command,
+                    args: parseJson(cmd.args, []),
                     exitCode: result.exitCode,
                     output: result.stdout
                 });
@@ -149,6 +153,8 @@ class CommandRunner {
             );
             
             logAudit(this.db, 'command_failed', 'command', commandId, 'system', {
+                command: cmd.command,
+                args: parseJson(cmd.args, []),
                 error: error.message,
                 exitCode: error.exitCode || 1
             });
@@ -170,6 +176,7 @@ class CommandRunner {
                 this.broadcast('command_failed', {
                     id: commandId,
                     command: cmd.command,
+                    args: parseJson(cmd.args, []),
                     error: error.message
                 });
             }
@@ -304,7 +311,7 @@ class CommandRunner {
     checkTimeouts() {
         const now = new Date().toISOString();
         const timedOut = this.db.prepare(`
-            SELECT id FROM commands 
+            SELECT id, command, args FROM commands 
             WHERE status = 'pending' 
             AND timeout_at IS NOT NULL 
             AND timeout_at < ?
@@ -316,6 +323,8 @@ class CommandRunner {
             `).run(now, cmd.id);
             
             logAudit(this.db, 'command_timeout', 'command', cmd.id, 'system', {
+                command: cmd.command,
+                args: parseJson(cmd.args, []),
                 reason: 'Approval window expired'
             });
             
@@ -451,67 +460,55 @@ function appendOutput(current, chunk) {
     };
 }
 
-function tokenizeCommand(commandLine) {
-    const input = String(commandLine || '').trim();
-    const tokens = [];
-    let current = '';
-    let quote = null;
-    let escaping = false;
-
-    for (const char of input) {
-        if (escaping) {
-            current += char;
-            escaping = false;
-            continue;
-        }
-
-        if (char === '\\') {
-            escaping = true;
-            continue;
-        }
-
-        if (quote) {
-            if (char === quote) {
-                quote = null;
-            } else {
-                current += char;
-            }
-            continue;
-        }
-
-        if (char === '\'' || char === '"') {
-            quote = char;
-            continue;
-        }
-
-        if (/\s/.test(char)) {
-            if (current) {
-                tokens.push(current);
-                current = '';
-            }
-            continue;
-        }
-
-        current += char;
-    }
-
-    if (current) {
-        tokens.push(current);
-    }
-
-    return tokens;
-}
-
 function isPathWithinRoots(targetPath, allowedRoots) {
-    const normalizedTarget = `${targetPath}${path.sep}`;
+    const targetIdentity = getPathIdentity(targetPath);
+    if (!targetIdentity) {
+        return false;
+    }
 
     return allowedRoots.some(root => {
-        let resolvedRoot;
-        try {
-            resolvedRoot = fs.realpathSync(path.resolve(root));
-        } catch (error) {
+        const rootIdentity = getPathIdentity(root);
+        if (!rootIdentity) {
             return false;
         }
-        return normalizedTarget.startsWith(`${resolvedRoot}${path.sep}`) || targetPath === resolvedRoot;
+
+        let currentPath = targetIdentity.path;
+        while (true) {
+            const currentIdentity = getPathIdentity(currentPath);
+            if (!currentIdentity) {
+                return false;
+            }
+
+            if (samePathIdentity(currentIdentity, rootIdentity)) {
+                return true;
+            }
+
+            const parentPath = path.dirname(currentPath);
+            if (parentPath === currentPath) {
+                return false;
+            }
+
+            currentPath = parentPath;
+        }
     });
 }
+
+function getPathIdentity(targetPath) {
+    try {
+        const resolvedPath = path.resolve(targetPath);
+        const stat = fs.statSync(resolvedPath);
+        return {
+            path: resolvedPath,
+            dev: stat.dev,
+            ino: stat.ino
+        };
+    } catch (error) {
+        return null;
+    }
+}
+
+function samePathIdentity(left, right) {
+    return left.dev === right.dev && left.ino === right.ino;
+}
+
+CommandRunner.isPathWithinRoots = isPathWithinRoots;
