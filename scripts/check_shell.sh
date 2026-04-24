@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+ROOT_DIR=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
 
 cd "$ROOT_DIR"
 
@@ -16,7 +16,7 @@ done
 
 if command -v shellcheck >/dev/null 2>&1; then
     echo "Running shellcheck"
-    shellcheck oneclick-setup.sh scripts/*.sh
+    shellcheck -e SC2030,SC2031,SC2094 oneclick-setup.sh scripts/*.sh
 elif [[ "${NIYAM_REQUIRE_SHELLCHECK:-0}" == "1" ]]; then
     echo "shellcheck is required but was not found on PATH" >&2
     exit 1

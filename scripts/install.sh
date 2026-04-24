@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-ROOT_DIR=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+ROOT_DIR=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
 ACTION=${1:-render}
 
 SERVICE_NAME=${NIYAM_SERVICE_NAME:-niyam}
@@ -62,19 +62,19 @@ install_app() {
 
     case "$INSTALL_DIR" in
         "$ROOT_DIR"/*)
-            set -- "$@" "--exclude=${INSTALL_DIR#$ROOT_DIR/}"
+            set -- "$@" "--exclude=${INSTALL_DIR#"$ROOT_DIR"/}"
             ;;
     esac
 
     case "$DATA_DIR" in
         "$ROOT_DIR"/*)
-            set -- "$@" "--exclude=${DATA_DIR#$ROOT_DIR/}"
+            set -- "$@" "--exclude=${DATA_DIR#"$ROOT_DIR"/}"
             ;;
     esac
 
     case "$RENDER_DIR" in
         "$ROOT_DIR"/*)
-            set -- "$@" "--exclude=${RENDER_DIR#$ROOT_DIR/}"
+            set -- "$@" "--exclude=${RENDER_DIR#"$ROOT_DIR"/}"
             ;;
     esac
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+ROOT_DIR=$(CDPATH='' cd -- "$(dirname "$0")" && pwd)
 
 PROFILE=""
 ENV_FILE=""
@@ -165,13 +165,12 @@ terminate_port_listeners() {
     local port=$1
     local pids=$2
     local pid
-    local attempt
 
     for pid in $pids; do
         kill "$pid" 2>/dev/null || true
     done
 
-    for attempt in 1 2 3 4 5; do
+    for _ in 1 2 3 4 5; do
         sleep 1
         if port_is_available "$port"; then
             return 0
@@ -781,7 +780,8 @@ start_server() {
 start_server_with_logs() {
     local log_dir=$1
     mkdir -p "$log_dir"
-    local log_file="$log_dir/niyam-$(timestamp_for_path).log"
+    local log_file
+    log_file="$log_dir/niyam-$(timestamp_for_path).log"
 
     if [[ -z "$PORT" ]]; then
         load_existing_env

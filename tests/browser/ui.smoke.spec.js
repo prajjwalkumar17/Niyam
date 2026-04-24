@@ -44,5 +44,5 @@ test('dashboard auth and primary navigation smoke', async ({ page }) => {
     await expect(page.getByText(/Runtime context, access posture, and shell setup in one place/i)).toBeVisible();
 
     await openNav(page, 'nav-users', 'Tokens');
-    await expect(page.getByText(/Managed Tokens/i)).toBeVisible();
+    await expect(page.locator('.card-title').filter({ hasText: 'Managed Tokens' }).first()).toBeVisible();
 });

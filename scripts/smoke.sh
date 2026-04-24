@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-ROOT_DIR=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+ROOT_DIR=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
 PORT=${NIYAM_SMOKE_PORT:-3410}
 ADMIN_PASSWORD=${NIYAM_SMOKE_ADMIN_PASSWORD:-admin}
 METRICS_TOKEN=${NIYAM_SMOKE_METRICS_TOKEN:-metrics-secret}

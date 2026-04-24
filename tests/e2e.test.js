@@ -1630,11 +1630,24 @@ test('niyam-cli install, status, and disable manage shell integration in a temp 
     assert.ok(renderedBash.includes('"$first_token" == "niyam-off"'));
     assert.ok(renderedBash.includes('local_command='));
 
-    const zshSyntax = await execFileAsync('zsh', ['-n', rcPath], {
-        cwd: ROOT_DIR,
-        env: { ...process.env, HOME: fakeHome }
-    });
-    assert.equal(zshSyntax.stderr, '');
+    let zshAvailable = false;
+    try {
+        await execFileAsync('sh', ['-c', 'command -v zsh >/dev/null 2>&1'], {
+            cwd: ROOT_DIR,
+            env: process.env
+        });
+        zshAvailable = true;
+    } catch (error) {
+        zshAvailable = false;
+    }
+
+    if (zshAvailable) {
+        const zshSyntax = await execFileAsync('zsh', ['-n', rcPath], {
+            cwd: ROOT_DIR,
+            env: { ...process.env, HOME: fakeHome }
+        });
+        assert.equal(zshSyntax.stderr, '');
+    }
 
     const login = await runNodeScript('bin/niyam-cli.js', cliEnv, [
         'login',

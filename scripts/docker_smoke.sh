@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+ROOT_DIR=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
 COMPOSE_FILE="$ROOT_DIR/docker-compose.smoke.yml"
 HOST_PORT="${NIYAM_DOCKER_SMOKE_HOST_PORT:-3410}"
 KEEP_ARTIFACTS="${NIYAM_DOCKER_SMOKE_KEEP_ARTIFACTS:-0}"

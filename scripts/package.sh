@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-ROOT_DIR=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+ROOT_DIR=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
 DIST_DIR=${NIYAM_DIST_DIR:-"$ROOT_DIR/.dist"}
 VERSION=$(node -p "require('$ROOT_DIR/package.json').version")
 ARTIFACT="$DIST_DIR/niyam-selfhost-$VERSION.tgz"
