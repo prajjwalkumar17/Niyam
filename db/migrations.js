@@ -151,6 +151,123 @@ const MIGRATIONS = [
             ensureIndex(db, 'idx_signup_requests_username', 'CREATE INDEX idx_signup_requests_username ON signup_requests(username)');
             ensureIndex(db, 'idx_signup_requests_requested_at', 'CREATE INDEX idx_signup_requests_requested_at ON signup_requests(requested_at)');
         }
+    },
+    {
+        id: '006_managed_tokens_and_auth_context',
+        description: 'Add managed CLI tokens and auth context tracking',
+        up(db) {
+            ensureColumn(db, 'commands', 'auth_mode', 'ALTER TABLE commands ADD COLUMN auth_mode TEXT');
+            ensureColumn(db, 'commands', 'auth_credential_id', 'ALTER TABLE commands ADD COLUMN auth_credential_id TEXT');
+            ensureColumn(db, 'commands', 'auth_credential_label', 'ALTER TABLE commands ADD COLUMN auth_credential_label TEXT');
+
+            ensureColumn(db, 'approvals', 'auth_mode', 'ALTER TABLE approvals ADD COLUMN auth_mode TEXT');
+            ensureColumn(db, 'approvals', 'auth_credential_id', 'ALTER TABLE approvals ADD COLUMN auth_credential_id TEXT');
+            ensureColumn(db, 'approvals', 'auth_credential_label', 'ALTER TABLE approvals ADD COLUMN auth_credential_label TEXT');
+
+            ensureColumn(db, 'cli_dispatches', 'auth_mode', 'ALTER TABLE cli_dispatches ADD COLUMN auth_mode TEXT');
+            ensureColumn(db, 'cli_dispatches', 'auth_credential_id', 'ALTER TABLE cli_dispatches ADD COLUMN auth_credential_id TEXT');
+            ensureColumn(db, 'cli_dispatches', 'auth_credential_label', 'ALTER TABLE cli_dispatches ADD COLUMN auth_credential_label TEXT');
+
+            if (!hasTable(db, 'managed_tokens')) {
+                db.exec(`
+                    CREATE TABLE managed_tokens (
+                        id TEXT PRIMARY KEY,
+                        label TEXT NOT NULL,
+                        subject_type TEXT NOT NULL,
+                        user_id TEXT,
+                        principal_identifier TEXT,
+                        principal_display_name TEXT,
+                        token_hash TEXT NOT NULL UNIQUE,
+                        token_prefix TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        created_by TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        last_used_at TEXT,
+                        blocked_at TEXT,
+                        blocked_by TEXT,
+                        metadata TEXT,
+                        FOREIGN KEY (user_id) REFERENCES local_users(id) ON DELETE CASCADE
+                    );
+                `);
+            }
+
+            ensureIndex(db, 'idx_managed_tokens_status', 'CREATE INDEX idx_managed_tokens_status ON managed_tokens(status)');
+            ensureIndex(db, 'idx_managed_tokens_user_id', 'CREATE INDEX idx_managed_tokens_user_id ON managed_tokens(user_id)');
+            ensureIndex(
+                db,
+                'idx_managed_tokens_principal_identifier',
+                'CREATE INDEX idx_managed_tokens_principal_identifier ON managed_tokens(principal_identifier)'
+            );
+        }
+    },
+    {
+        id: '007_auto_approval_preferences',
+        description: 'Add auto-approval preferences for users and standalone tokens',
+        up(db) {
+            ensureColumn(
+                db,
+                'local_users',
+                'auto_approval_enabled',
+                'ALTER TABLE local_users ADD COLUMN auto_approval_enabled INTEGER DEFAULT 0'
+            );
+            ensureColumn(
+                db,
+                'managed_tokens',
+                'auto_approval_enabled',
+                'ALTER TABLE managed_tokens ADD COLUMN auto_approval_enabled INTEGER DEFAULT 0'
+            );
+        }
+    },
+    {
+        id: '008_runtime_product_mode_lock',
+        description: 'Persist the initialized product mode and prevent mode switching without reset',
+        up(db) {
+            if (!hasTable(db, 'runtime_settings')) {
+                db.exec(`
+                    CREATE TABLE runtime_settings (
+                        key TEXT PRIMARY KEY,
+                        value TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    );
+                `);
+            }
+        }
+    },
+    {
+        id: '009_auto_approval_modes',
+        description: 'Promote auto-approval preferences from boolean flags to explicit modes',
+        up(db) {
+            ensureColumn(
+                db,
+                'local_users',
+                'auto_approval_mode',
+                "ALTER TABLE local_users ADD COLUMN auto_approval_mode TEXT DEFAULT 'off'"
+            );
+            ensureColumn(
+                db,
+                'managed_tokens',
+                'auto_approval_mode',
+                "ALTER TABLE managed_tokens ADD COLUMN auto_approval_mode TEXT DEFAULT 'off'"
+            );
+
+            db.exec(`
+                UPDATE local_users
+                SET auto_approval_mode = CASE
+                    WHEN auto_approval_mode IS NOT NULL AND auto_approval_mode != '' THEN auto_approval_mode
+                    WHEN auto_approval_enabled = 1 THEN 'normal'
+                    ELSE 'off'
+                END
+            `);
+
+            db.exec(`
+                UPDATE managed_tokens
+                SET auto_approval_mode = CASE
+                    WHEN auto_approval_mode IS NOT NULL AND auto_approval_mode != '' THEN auto_approval_mode
+                    WHEN auto_approval_enabled = 1 THEN 'normal'
+                    ELSE 'off'
+                END
+            `);
+        }
     }
 ];
 

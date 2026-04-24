@@ -25,7 +25,7 @@
         </div>
         <ul class="nav-links">
             <li>
-                <a href="#dashboard" class="nav-link" data-page="dashboard">
+                <a href="#dashboard" class="nav-link" data-page="dashboard" data-testid="nav-dashboard">
                     <span class="nav-icon" aria-hidden="true">
                         <svg viewBox="0 0 24 24"><path d="M4 19h16M7 15v-4M12 15V7M17 15v-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
                     </span>
@@ -33,7 +33,7 @@
                 </a>
             </li>
             <li>
-                <a href="#pending" class="nav-link" data-page="pending">
+                <a href="#pending" class="nav-link" data-page="pending" data-testid="nav-pending">
                     <span class="nav-icon" aria-hidden="true">
                         <svg viewBox="0 0 24 24"><path d="M8 4h8M8 20h8M8 4c0 4 8 4 8 8s-8 4-8 8M16 4c0 4-8 4-8 8s8 4 8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </span>
@@ -42,31 +42,15 @@
                 </a>
             </li>
             <li>
-                <a href="#history" class="nav-link" data-page="history">
+                <a href="#history" class="nav-link" data-page="history" data-testid="nav-history">
                     <span class="nav-icon" aria-hidden="true">
                         <svg viewBox="0 0 24 24"><path d="M8 5h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8a3 3 0 1 1 0-6h10M8 5a3 3 0 1 0 0 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </span>
-                    <span class="nav-text">History</span>
+                    <span class="nav-text">Activity</span>
                 </a>
             </li>
             <li>
-                <a href="#workspace" class="nav-link" data-page="workspace">
-                    <span class="nav-icon" aria-hidden="true">
-                        <svg viewBox="0 0 24 24"><path d="M4 6h16v12H4zM8 10h8M8 14h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    </span>
-                    <span class="nav-text">Workspace</span>
-                </a>
-            </li>
-            <li>
-                <a href="#dispatches" class="nav-link" data-page="dispatches" data-admin-only="true">
-                    <span class="nav-icon" aria-hidden="true">
-                        <svg viewBox="0 0 24 24"><path d="M5 12h4l2-4 3 8 2-4h3M6 6h12M6 18h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    </span>
-                    <span class="nav-text">Dispatches</span>
-                </a>
-            </li>
-            <li>
-                <a href="#rules" class="nav-link" data-page="rules" data-admin-only="true">
+                <a href="#rules" class="nav-link" data-page="rules" data-admin-only="true" data-testid="nav-rules">
                     <span class="nav-icon" aria-hidden="true">
                         <svg viewBox="0 0 24 24"><path d="M9 4h6l1 2h3v14H5V6h3l1-2Zm0 6h6M9 12h6M9 16h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </span>
@@ -74,7 +58,7 @@
                 </a>
             </li>
             <li>
-                <a href="#audit" class="nav-link" data-page="audit" data-admin-only="true">
+                <a href="#audit" class="nav-link" data-page="audit" data-admin-only="true" data-testid="nav-audit">
                     <span class="nav-icon" aria-hidden="true">
                         <svg viewBox="0 0 24 24"><path d="M10.5 18a7.5 7.5 0 1 1 5.3-2.2L20 20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </span>
@@ -82,7 +66,15 @@
                 </a>
             </li>
             <li>
-                <a href="#users" class="nav-link" data-page="users" data-admin-only="true">
+                <a href="#workspace" class="nav-link" data-page="workspace" data-testid="nav-workspace">
+                    <span class="nav-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24"><path d="M4 6h16v12H4zM8 10h8M8 14h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </span>
+                    <span class="nav-text">Workspace</span>
+                </a>
+            </li>
+            <li>
+                <a href="#users" class="nav-link" data-page="users" data-admin-only="true" data-testid="nav-users">
                     <span class="nav-icon" aria-hidden="true">
                         <svg viewBox="0 0 24 24"><path d="M7 18a4 4 0 1 1 0-8 4 4 0 0 1 0 8Zm10-2a3 3 0 1 1 0-6 3 3 0 0 1 0 6ZM3 21a5.5 5.5 0 0 1 8 0m5.5-.5a4.5 4.5 0 0 1 4.5 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </span>
@@ -112,7 +104,7 @@
                     <span class="btn-icon" aria-hidden="true">
                         <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 0 1-13.7 5.7M4 12a8 8 0 0 1 13.7-5.7M17 4v4h-4M7 20v-4h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </span>
-                    Auto: ON
+                    Refresh: ON
                 </button>
                 <button class="btn btn-primary has-tooltip tooltip-below" id="submit-command-btn" data-tooltip="Open the command submission flow with policy simulation before execution.">
                     <span class="btn-icon" aria-hidden="true">
@@ -215,17 +207,17 @@
             <div class="modal-body">
                 <div class="form-group">
                     <label for="login-username">Username</label>
-                    <input type="text" id="login-username" class="form-input" autocomplete="username" value="admin">
+                    <input type="text" id="login-username" class="form-input" autocomplete="username" value="admin" data-testid="login-username">
                 </div>
                 <div class="form-group">
                     <label for="login-password">Password</label>
-                    <input type="password" id="login-password" class="form-input" autocomplete="current-password">
+                    <input type="password" id="login-password" class="form-input" autocomplete="current-password" data-testid="login-password">
                 </div>
                 <div class="text-sm text-muted" id="login-status">Sign in with a local Niyam account to continue.</div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" id="show-signup-btn" style="display:none">Request Access</button>
-                <button class="btn btn-primary" id="login-btn">Sign In</button>
+                <button class="btn btn-primary" id="login-btn" data-testid="login-submit">Sign In</button>
             </div>
         </div>
     </div>

@@ -26,13 +26,34 @@ This document lists the main environment variables used by Niyam.
 - `NIYAM_ADMIN_USERNAME`
 - `NIYAM_ADMIN_PASSWORD`
 - `NIYAM_ADMIN_IDENTIFIER`
+- `NIYAM_PRODUCT_MODE`
 - `NIYAM_ENABLE_SELF_SIGNUP`
 - `NIYAM_SESSION_TTL_HOURS`
 - `NIYAM_SESSION_CLEANUP_INTERVAL_MS`
 
-### Team Mode
+### Product Mode
 
-`NIYAM_ENABLE_SELF_SIGNUP=true` enables team mode signup requests.
+`NIYAM_PRODUCT_MODE` accepts:
+
+- `individual`
+- `teams`
+
+Defaulting:
+
+- if `NIYAM_PRODUCT_MODE` is set, that value wins
+- otherwise Niyam defaults to `teams` when `NIYAM_ENABLE_SELF_SIGNUP=true`
+- otherwise Niyam defaults to `individual`
+
+Important:
+
+- `NIYAM_ENABLE_SELF_SIGNUP=true` is only valid in `teams` mode
+- `individual` mode with `NIYAM_ENABLE_SELF_SIGNUP=true` is rejected at startup
+- the initialized product mode is locked in the database
+- switching from `individual` to `teams` or back requires clearing and rebuilding the database from scratch
+
+### Team Signup Mode
+
+`NIYAM_ENABLE_SELF_SIGNUP=true` enables signup requests in `teams` mode.
 
 When enabled:
 
@@ -45,19 +66,20 @@ When disabled:
 - admins can still create users directly from the `Users` page
 - there is no public self-signup path
 
-## Agent Auth
+## CLI And API Auth
 
-- `NIYAM_AGENT_TOKENS`
-- `NIYAM_AGENT_TOKEN`
-- `NIYAM_AGENT_IDENTIFIER`
+The primary CLI and agent auth model is now dashboard-managed tokens:
 
-`NIYAM_AGENT_TOKENS` is the preferred multi-agent format.
+- admin session routes create global managed tokens at `Users > Managed Tokens`
+- local user sessions in `teams` mode can create their own tokens from `Workspace > My CLI Tokens`
+- tokens are shown in plaintext only once
+- blocked tokens stop authenticating immediately
 
-Example:
+Use managed tokens when:
 
-```bash
-export NIYAM_AGENT_TOKENS='{"niyam-agent":"dev-token","reviewer":"another-token"}'
-```
+- you want per-CLI labels in audit and history
+- you want admins or end users to create and block tokens from the dashboard
+- you want `individual` mode standalone identities such as `June` and `January`
 
 ## Execution Controls
 
@@ -151,7 +173,7 @@ This means:
 ```bash
 export NODE_ENV=production
 export NIYAM_ADMIN_PASSWORD='replace-me'
-export NIYAM_AGENT_TOKENS='{"niyam-agent":"replace-me"}'
+export NIYAM_PRODUCT_MODE=teams
 export NIYAM_DATA_DIR=/var/lib/niyam
 export NIYAM_DB=/var/lib/niyam/niyam.db
 export NIYAM_ALLOWED_ORIGINS='https://niyam.example.com'

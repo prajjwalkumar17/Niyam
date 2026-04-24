@@ -37,6 +37,42 @@ function renderDashboard(container) {
             <div class="surface-card">
                 <div class="surface-section-head">
                     <div>
+                        <div class="card-title">Commands Vs Dispatches</div>
+                        <div class="surface-section-copy">Commands are governed executions. Dispatches are the raw shell lines Niyam intercepted before it decided whether to create a governed command, let the shell line stay local, or block it.</div>
+                    </div>
+                </div>
+                <div class="surface-section-copy">That means every remote governed command starts as a dispatch, but local passthroughs only appear in the Dispatches view.</div>
+            </div>
+            <div class="surface-card">
+                <div class="surface-section-head">
+                    <div>
+                        <div class="card-title">Dispatch Routes</div>
+                        <div class="surface-section-copy">Use the Dispatches page to understand how Niyam handled intercepted shell traffic.</div>
+                    </div>
+                </div>
+                <div style="display:grid;gap:12px">
+                    <div>
+                        <span class="status-badge approved">Remote Exec</span>
+                        <div class="surface-section-copy">Turned into a governed command.</div>
+                    </div>
+                    <div>
+                        <span class="status-badge pending">Local Passthrough</span>
+                        <div class="surface-section-copy">Stayed in the local shell.</div>
+                    </div>
+                    <div>
+                        <span class="status-badge rejected">Blocked</span>
+                        <div class="surface-section-copy">Stopped before execution.</div>
+                    </div>
+                </div>
+                <div style="margin-top:16px">
+                    <a class="btn btn-secondary btn-sm" href="#history">Open Activity</a>
+                </div>
+            </div>
+        </section>
+        <section class="surface-grid-2 fade-in">
+            <div class="surface-card">
+                <div class="surface-section-head">
+                    <div>
                         <div class="card-title">Recent Commands</div>
                         <div class="surface-section-copy">Latest command submissions and their current approval or execution state.</div>
                     </div>
@@ -93,7 +129,7 @@ async function loadRecentActivity() {
                 <span class="activity-icon">${renderCommandStatusChip(command)}</span>
                 <div class="activity-content">
                     <div class="activity-title"><code>${escapeHtml(buildCommandLineDisplay(command))}</code></div>
-                    <div class="activity-time">${escapeHtml(command.requester)} · ${escapeHtml(command.status)} · ${timeAgo(command.created_at)}</div>
+                    <div class="activity-time">${escapeHtml(describeActorWithAuth(command.requester, command.authenticationContext))} · ${escapeHtml(command.status)}${hasAutoApprovalAssist(command) ? ' · auto approval' : ''} · ${timeAgo(command.created_at)}</div>
                 </div>
             </div>
         `).join('');
@@ -125,7 +161,7 @@ async function loadPendingPreview() {
                         <span class="risk-badge ${cmd.risk_level.toLowerCase()}">${cmd.risk_level}</span>
                         <code class="pending-preview-command">${escapeHtml(buildCommandLineDisplay(cmd))}</code>
                     </div>
-                    <div class="pending-preview-meta">${cmd.requester} · ${timeAgo(cmd.created_at)} · ${formatApprovalProgress(cmd)}</div>
+                    <div class="pending-preview-meta">${escapeHtml(describeActorWithAuth(cmd.requester, cmd.authenticationContext))} · ${timeAgo(cmd.created_at)} · ${formatApprovalProgress(cmd)}${hasAutoApprovalAssist(cmd) ? ' · auto approval active' : ''}</div>
                 </div>
                 <div class="pending-preview-timer">
                     ${renderTimer(cmd.timeout_at, cmd.created_at, 'bar')}

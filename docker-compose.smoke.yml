@@ -1,0 +1,23 @@
+services:
+  niyam:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: production
+      NIYAM_PORT: 3000
+      NIYAM_ADMIN_PASSWORD: admin
+      NIYAM_METRICS_TOKEN: metrics-secret
+      NIYAM_EXEC_DATA_KEY: smoke-test-key
+      NIYAM_EXEC_DEFAULT_MODE: DIRECT
+      NIYAM_EXEC_WRAPPER: '["/usr/bin/env"]'
+      NIYAM_EXEC_ALLOWED_ROOTS: /workspace,/app,/var/lib/niyam
+      NIYAM_PRODUCT_MODE: individual
+    ports:
+      - "${NIYAM_DOCKER_SMOKE_HOST_PORT:-3410}:3000"
+    volumes:
+      - ./:/workspace:ro
+      - niyam_smoke_data:/var/lib/niyam
+
+volumes:
+  niyam_smoke_data:

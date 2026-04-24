@@ -3,27 +3,36 @@
  */
 
 let editingRuleId = null;
+let rulesPageState = {
+    packsCollapsed: true
+};
 
 function renderRules(container) {
     container.innerHTML = `
-        <section class="workspace-header fade-in">
-            <div class="workspace-header-copy">
-                <div class="workspace-kicker">Policy Fabric</div>
-                <p class="workspace-subtitle">Manage curated pack templates, custom rules, risk overrides, and wrapper routing from one compact control surface.</p>
-            </div>
-            <div class="workspace-controls">
-                <button class="btn btn-primary" id="add-rule-btn">New Rule</button>
-            </div>
-        </section>
         <section class="rules-overview fade-in" id="rules-overview"></section>
-        <section class="rules-section fade-in">
+        <section class="rules-section fade-in rules-pack-library ${rulesPageState.packsCollapsed ? 'is-collapsed' : ''}" id="rules-pack-library">
             <div class="rules-section-head">
                 <div>
                     <div class="card-title">Built-In Rule Packs</div>
-                    <div class="rules-section-copy">Curated packs for common developer tooling with preview and upgrade support.</div>
+                    <div class="rules-section-copy">Keep the pack library nearby for bootstrapping and upgrades, but out of the way when you are working on live rules.</div>
+                </div>
+                <div class="rules-pack-library-actions">
+                    <span class="rules-summary-chip" id="rule-packs-summary">Pack library</span>
+                    <button
+                        class="btn btn-secondary"
+                        id="toggle-rule-packs-btn"
+                        data-testid="rule-packs-toggle"
+                        type="button"
+                        aria-controls="rule-packs-panel"
+                        aria-expanded="${rulesPageState.packsCollapsed ? 'false' : 'true'}"
+                    >
+                        ${rulesPageState.packsCollapsed ? 'Show Pack Library' : 'Hide Pack Library'}
+                    </button>
                 </div>
             </div>
-            <div class="rules-pack-grid" id="rule-packs-list"></div>
+            <div class="rules-pack-library-body" id="rule-packs-panel" aria-hidden="${rulesPageState.packsCollapsed ? 'true' : 'false'}">
+                <div class="rules-pack-grid" id="rule-packs-list"></div>
+            </div>
         </section>
         <section class="rules-section fade-in">
             <div class="rules-section-head">
@@ -47,11 +56,16 @@ function renderRules(container) {
             </div>
             <div id="rules-list"></div>
         </section>
+        <button class="btn btn-primary rules-fab" id="add-rule-btn" data-testid="rules-fab" type="button" aria-label="Add new rule">
+            <span class="rules-fab-icon" aria-hidden="true">+</span>
+            <span class="rules-fab-label">New Rule</span>
+        </button>
     `;
 
     document.getElementById('rules-type-filter').addEventListener('change', loadRulesPage);
     document.getElementById('rules-source-filter').addEventListener('change', loadRulesPage);
     document.getElementById('add-rule-btn').addEventListener('click', () => openRuleForm());
+    initRulePackLibrary();
     loadRulesPage();
 }
 
@@ -74,12 +88,17 @@ async function loadRulesPage() {
         const filteredRules = filterRules(rules, typeFilter, sourceFilter);
 
         renderRulesOverview(packs, filteredRules, typeFilter, sourceFilter);
-        renderRulePacks(packs);
         renderRulesList(filteredRules, typeFilter, sourceFilter);
+        renderRulePacks(packs);
+        updateRulePackLibrarySummary(packs);
     } catch (error) {
         document.getElementById('rules-overview').innerHTML = renderEmptyState('Failed to load policy overview', 'blocked');
         document.getElementById('rule-packs-list').innerHTML = renderEmptyState('Failed to load rule packs', 'blocked');
         document.getElementById('rules-list').innerHTML = renderEmptyState('Failed to load rules', 'blocked');
+        const summary = document.getElementById('rule-packs-summary');
+        if (summary) {
+            summary.textContent = 'Pack library unavailable';
+        }
     }
 }
 
@@ -160,6 +179,43 @@ function renderRulePacks(packs) {
             </div>
         </article>
     `).join('');
+}
+
+function initRulePackLibrary() {
+    const toggle = document.getElementById('toggle-rule-packs-btn');
+    if (!toggle) {
+        return;
+    }
+
+    toggle.addEventListener('click', () => {
+        rulesPageState.packsCollapsed = !rulesPageState.packsCollapsed;
+        syncRulePackLibraryState();
+    });
+}
+
+function syncRulePackLibraryState() {
+    const library = document.getElementById('rules-pack-library');
+    const toggle = document.getElementById('toggle-rule-packs-btn');
+    const panel = document.getElementById('rule-packs-panel');
+    if (!library || !toggle || !panel) {
+        return;
+    }
+
+    library.classList.toggle('is-collapsed', rulesPageState.packsCollapsed);
+    toggle.textContent = rulesPageState.packsCollapsed ? 'Show Pack Library' : 'Hide Pack Library';
+    toggle.setAttribute('aria-expanded', rulesPageState.packsCollapsed ? 'false' : 'true');
+    panel.setAttribute('aria-hidden', rulesPageState.packsCollapsed ? 'true' : 'false');
+}
+
+function updateRulePackLibrarySummary(packs) {
+    const summary = document.getElementById('rule-packs-summary');
+    if (!summary) {
+        return;
+    }
+
+    const installedPackCount = Array.isArray(packs) ? packs.filter(pack => pack.installed).length : 0;
+    const totalPackCount = Array.isArray(packs) ? packs.length : 0;
+    summary.textContent = `${installedPackCount} installed · ${totalPackCount} available`;
 }
 
 function renderRulesList(rules, typeFilter, sourceFilter) {

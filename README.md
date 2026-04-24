@@ -17,6 +17,7 @@
   <a href="./docs/individual_setup.md">Individual Setup</a> ·
   <a href="./docs/team_setup.md">Team Setup</a> ·
   <a href="./docs/cli_wrapper.md">CLI Wrapper</a> ·
+  <a href="./docs/testing.md">Testing</a> ·
   <a href="./docs/usage.md">Usage</a> ·
   <a href="./docs/api_reference.md">API</a> ·
   <a href="./docs/deployment.md">Deployment</a> ·
@@ -45,6 +46,9 @@ So you can decide:
 
 - policy simulation before submission
 - interactive CLI wrapper for shell-native usage
+- explicit `individual` and `teams` product modes
+- dashboard-managed CLI tokens for standalone identities and per-user toolchains
+- per-user and per-standalone-token auto-approval with a synthetic auditable auto-approver
 - optional team mode with local users and admin-approved signup
 - approvals for `LOW`, `MEDIUM`, and `HIGH`
 - rule-driven `DIRECT` vs `WRAPPER`
@@ -91,17 +95,52 @@ Want guided setup instead?
 ./oneclick-setup.sh
 ```
 
+Oneclick now asks which product mode you want:
+
+- `Individual`: use dashboard-managed standalone token identities such as `June` or `January`
+- `Teams`: keep real local dashboard users and optionally let each user create their own CLI tokens
+
 Windows users should start with [Local setup](./docs/local_setup.md), which includes both `WSL` and native `PowerShell` paths.
 
 ## Start Here
 
-- [Local setup](./docs/local_setup.md): macOS, Linux, Windows, first-run demo flow, curl examples
-- [Individual setup](./docs/individual_setup.md): one-person local setup, wrapper install, and the simplest operating model
-- [Team setup](./docs/team_setup.md): central-server rollout, multi-machine developer setup, and high-risk dual approval workflows
-- [CLI wrapper](./docs/cli_wrapper.md): install, auth modes, `login`, `logout`, `niyam-on`, `niyam-off`, and removal commands
+- [Local setup](./docs/local_setup.md): macOS, Linux, Windows, oneclick flow, token seeding, and curl examples
+- [Individual setup](./docs/individual_setup.md): one-person setup with standalone managed token identities for each CLI
+- [Team setup](./docs/team_setup.md): shared rollout with local users, self-service CLI tokens, and high-risk dual approval workflows
+- [CLI wrapper](./docs/cli_wrapper.md): install, auth precedence, `login --token`, `login --username`, `logout`, `niyam-on`, `niyam-off`, and removal commands
 - [Usage guide](./docs/usage.md): approvals, packs, wrapper mode, operator flow
 - [Feature guide](./docs/features.md): simulation, templates, redaction
 - [API reference](./docs/api_reference.md): endpoints and payloads
+
+## Identity Model
+
+Niyam now supports two first-class deployment modes.
+
+### Individual
+
+- the dashboard still uses only the bootstrap `admin` account
+- local-user workflows and user-linked token flows stay dormant while `individual` mode is active
+- CLI and agent access uses dashboard-generated standalone managed tokens
+- each token can carry its own identity label, so separate CLIs show up as `June`, `January`, and so on
+
+### Teams
+
+- humans keep local dashboard accounts with username and password
+- admins can create an initial CLI token for any user
+- each local user can later create and block their own CLI tokens from `Workspace`
+- each local user can enable or disable their own auto-approval mode from `Workspace`
+- audit and history show the effective user plus the token label, for example `alice via Cursor CLI`
+
+## Auto Approval
+
+Niyam now supports approval automation without losing auditability.
+
+- `LOW` risk stays policy auto-approved
+- `MEDIUM` risk can be auto-approved when the submitting user or standalone token has auto approval enabled
+- `HIGH` risk gets one approval from `niyam-auto-approver` and still needs one distinct human approver
+- the synthetic auto-approver is recorded in approvals, history, and audit
+
+Managed tokens are now the CLI and API auth path for operators, standalone identities, and user-linked workflows.
 
 ## Operator Docs
 
@@ -136,15 +175,12 @@ Niyam stays the system of record while approvals move closer to where teams alre
 ## Verify
 
 ```bash
-npm test
-npm run smoke
-npm run smoke:wrapper
-npm run smoke:dashboard
-npm run smoke:dashboard:reset
+npm run verify
 ```
 
 More:
 
+- [Testing](./docs/testing.md)
 - [Security](./docs/security.md)
 - [Contributing](./docs/contributing.md)
 - [Public release checklist](./docs/public_release.md)

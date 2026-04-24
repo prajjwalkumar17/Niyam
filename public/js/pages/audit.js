@@ -9,9 +9,44 @@ let auditState = {
         startDate: '',
         endDate: ''
     },
+    actorOptions: [],
     limit: 50,
     offset: 0,
-    total: 0
+    total: 0,
+    legendCollapsed: true
+};
+
+const AUDIT_EVENT_CONFIG = {
+    command_submitted: { code: 'SB', tone: '', class: '', label: 'Command Submitted' },
+    command_approved: { code: 'OK', tone: 'approved', class: 'event-approved', label: 'Command Approved' },
+    command_rejected: { code: 'NO', tone: 'rejected', class: 'event-rejected', label: 'Command Rejected' },
+    command_executed: { code: 'EX', tone: '', class: '', label: 'Command Executed' },
+    command_failed: { code: 'ER', tone: 'error', class: 'event-rejected', label: 'Command Failed' },
+    command_blocked: { code: 'BL', tone: 'warning', class: 'event-command_blocked', label: 'Command Blocked' },
+    command_timeout: { code: 'TM', tone: 'warning', class: '', label: 'Command Timed Out' },
+    cli_dispatch_created: { code: 'CD', tone: '', class: '', label: 'CLI Dispatch Created' },
+    cli_dispatch_blocked: { code: 'CB', tone: 'warning', class: 'event-command_blocked', label: 'CLI Dispatch Blocked' },
+    cli_dispatch_linked_command: { code: 'LK', tone: 'approved', class: 'event-approved', label: 'CLI Dispatch Linked Command' },
+    cli_dispatch_local_completed: { code: 'LC', tone: 'approved', class: 'event-approved', label: 'CLI Dispatch Local Completed' },
+    cli_dispatch_local_failed: { code: 'LF', tone: 'error', class: 'event-rejected', label: 'CLI Dispatch Local Failed' },
+    approval_granted: { code: 'AP', tone: 'approved', class: 'event-approved', label: 'Approval Granted' },
+    auto_approval_preference_changed: { code: 'AA', tone: '', class: '', label: 'Auto Approval Preference Changed' },
+    token_created: { code: 'TK', tone: 'approved', class: 'event-approved', label: 'Token Created' },
+    token_blocked: { code: 'TB', tone: 'warning', class: 'event-command_blocked', label: 'Token Blocked' },
+    rule_created: { code: 'RC', tone: '', class: '', label: 'Rule Created' },
+    rule_updated: { code: 'RU', tone: '', class: '', label: 'Rule Updated' },
+    rule_deleted: { code: 'RD', tone: 'rejected', class: 'event-rejected', label: 'Rule Deleted' },
+    rule_pack_installed: { code: 'PK', tone: '', class: '', label: 'Rule Pack Installed' },
+    rule_pack_upgrade_previewed: { code: 'PV', tone: '', class: '', label: 'Rule Pack Upgrade Previewed' },
+    rule_pack_upgraded: { code: 'UP', tone: '', class: '', label: 'Rule Pack Upgraded' },
+    signup_requested: { code: 'SR', tone: '', class: '', label: 'Signup Requested' },
+    signup_approved: { code: 'SA', tone: 'approved', class: 'event-approved', label: 'Signup Approved' },
+    signup_rejected: { code: 'SX', tone: 'rejected', class: 'event-rejected', label: 'Signup Rejected' },
+    user_created: { code: 'UC', tone: 'approved', class: 'event-approved', label: 'User Created' },
+    user_updated: { code: 'UU', tone: '', class: '', label: 'User Updated' },
+    user_password_reset: { code: 'PR', tone: 'warning', class: '', label: 'User Password Reset' },
+    password_changed: { code: 'PW', tone: '', class: '', label: 'Password Changed' },
+    exec_key_rotated: { code: 'KR', tone: 'warning', class: '', label: 'Execution Key Rotated' }
 };
 
 function renderAudit(container) {
@@ -51,6 +86,9 @@ function renderAudit(container) {
                     <option value="cli_dispatch_local_completed">CLI Local Completed</option>
                     <option value="cli_dispatch_local_failed">CLI Local Failed</option>
                     <option value="approval_granted">Approval Granted</option>
+                    <option value="auto_approval_preference_changed">Auto Approval Preference Changed</option>
+                    <option value="token_created">Token Created</option>
+                    <option value="token_blocked">Token Blocked</option>
                     <option value="rule_created">Rule Created</option>
                     <option value="rule_updated">Rule Updated</option>
                     <option value="rule_deleted">Rule Deleted</option>
@@ -65,7 +103,9 @@ function renderAudit(container) {
                     <option value="user_password_reset">User Password Reset</option>
                     <option value="password_changed">Password Changed</option>
                 </select>
-                <input type="text" class="form-input" id="audit-actor-filter" placeholder="Filter by actor">
+                <select class="filter-select" id="audit-actor-filter">
+                    <option value="">All Actors</option>
+                </select>
                 <input type="date" class="form-input" id="audit-start-date" title="Start date">
                 <input type="date" class="form-input" id="audit-end-date" title="End date">
                 <div class="audit-filter-actions">
@@ -105,19 +145,19 @@ function renderAudit(container) {
             <div id="audit-timeline" class="timeline"></div>
             <div id="audit-pagination" class="audit-pagination"></div>
         </section>
+        ${renderAuditLegend()}
     `;
     
     // Initialize event listeners
     document.getElementById('audit-event-filter').addEventListener('change', applyAuditFilters);
-    document.getElementById('audit-actor-filter').addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') applyAuditFilters();
-    });
+    document.getElementById('audit-actor-filter').addEventListener('change', applyAuditFilters);
     document.getElementById('audit-start-date').addEventListener('change', applyAuditFilters);
     document.getElementById('audit-end-date').addEventListener('change', applyAuditFilters);
     document.getElementById('audit-apply-btn').addEventListener('click', applyAuditFilters);
     document.getElementById('audit-clear-btn').addEventListener('click', clearAuditFilters);
     document.getElementById('audit-export-json').addEventListener('click', () => exportAuditLog('json'));
     document.getElementById('audit-export-csv').addEventListener('click', () => exportAuditLog('csv'));
+    initAuditLegend();
     
     // Load initial data
     loadAuditStats();
@@ -149,6 +189,11 @@ async function loadAuditStats() {
     try {
         const response = await apiFetch('/audit/stats');
         const stats = await response.json();
+
+        auditState.actorOptions = Array.isArray(stats.allActors)
+            ? stats.allActors.map(entry => String(entry.actor || '').trim()).filter(Boolean)
+            : [];
+        renderAuditActorOptions();
         
         // Event distribution
         const eventStatsEl = document.getElementById('audit-event-stats');
@@ -176,9 +221,30 @@ async function loadAuditStats() {
             actorStatsEl.innerHTML = '<div class="text-muted text-sm">No actors recorded</div>';
         }
     } catch (e) {
+        renderAuditActorOptions();
         document.getElementById('audit-event-stats').innerHTML = '<div class="text-muted text-sm">Failed to load stats</div>';
         document.getElementById('audit-actor-stats').innerHTML = '<div class="text-muted text-sm">Failed to load stats</div>';
     }
+}
+
+function renderAuditActorOptions() {
+    const actorSelect = document.getElementById('audit-actor-filter');
+    if (!actorSelect) {
+        return;
+    }
+
+    const selectedActor = auditState.filters.actor || '';
+    const actorOptions = [...new Set([
+        ...auditState.actorOptions,
+        ...(selectedActor ? [selectedActor] : [])
+    ])].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: 'base' }));
+
+    actorSelect.innerHTML = [
+        '<option value="">All Actors</option>',
+        ...actorOptions.map(actor => `
+            <option value="${escapeHtmlAttribute(actor)}" ${actor === selectedActor ? 'selected' : ''}>${escapeHtml(actor)}</option>
+        `)
+    ].join('');
 }
 
 async function loadAuditLog() {
@@ -216,50 +282,23 @@ async function loadAuditLog() {
         
         countEl.textContent = `Showing ${data.entries.length} entries`;
         
-        // Event type icons and colors
-        const eventConfig = {
-            command_submitted: { icon: renderEventChip('SB'), class: '' },
-            command_approved: { icon: renderEventChip('OK', 'approved'), class: 'event-approved' },
-            command_rejected: { icon: renderEventChip('NO', 'rejected'), class: 'event-rejected' },
-            command_executed: { icon: renderEventChip('EX'), class: '' },
-            command_failed: { icon: renderEventChip('ER', 'error'), class: 'event-rejected' },
-            command_blocked: { icon: renderEventChip('BL', 'warning'), class: 'event-command_blocked' },
-            command_timeout: { icon: renderEventChip('TM', 'warning'), class: '' },
-            cli_dispatch_created: { icon: renderEventChip('CD'), class: '' },
-            cli_dispatch_blocked: { icon: renderEventChip('CB', 'warning'), class: 'event-command_blocked' },
-            cli_dispatch_linked_command: { icon: renderEventChip('LK', 'approved'), class: 'event-approved' },
-            cli_dispatch_local_completed: { icon: renderEventChip('LC', 'approved'), class: 'event-approved' },
-            cli_dispatch_local_failed: { icon: renderEventChip('LF', 'error'), class: 'event-rejected' },
-            approval_granted: { icon: renderEventChip('AP', 'approved'), class: 'event-approved' },
-            rule_created: { icon: renderEventChip('RC'), class: '' },
-            rule_updated: { icon: renderEventChip('RU'), class: '' },
-            rule_deleted: { icon: renderEventChip('RD', 'rejected'), class: 'event-rejected' },
-            rule_pack_installed: { icon: renderEventChip('PK'), class: '' },
-            rule_pack_upgrade_previewed: { icon: renderEventChip('PV'), class: '' },
-            rule_pack_upgraded: { icon: renderEventChip('UP'), class: '' },
-            signup_requested: { icon: renderEventChip('SR'), class: '' },
-            signup_approved: { icon: renderEventChip('SA', 'approved'), class: 'event-approved' },
-            signup_rejected: { icon: renderEventChip('SX', 'rejected'), class: 'event-rejected' },
-            password_changed: { icon: renderEventChip('PW'), class: '' },
-            exec_key_rotated: { icon: renderEventChip('KR', 'warning'), class: '' }
-        };
-        
         timeline.innerHTML = data.entries.map(entry => {
-            const config = eventConfig[entry.event_type] || { icon: renderEventChip('EV'), class: '' };
+            const config = getAuditEventConfig(entry.event_type);
             const detailsHtml = formatAuditDetails(entry);
             const commandLine = formatAuditCommandLine(entry.details || {});
+            const actorLabel = describeAuditActor(entry);
             
             return `
                 <div class="timeline-item fade-in ${config.class}">
                     <div class="timeline-time">${formatTime(entry.created_at)}</div>
                     <div class="timeline-title">
-                        ${config.icon} ${formatEventType(entry.event_type)}
+                        ${renderEventChip(config.code, config.tone)} ${config.label}
                         ${entry.entity_type ? `<span class="timeline-entity">· ${entry.entity_type}</span>` : ''}
                         ${commandLine ? ` <code style="color:var(--accent-cyan)">${escapeHtml(commandLine)}</code>` : ''}
                         ${entry.redacted ? `<span class="status-badge rejected">Redacted</span>` : ''}
                     </div>
                     <div class="timeline-details">
-                        <div><strong>Actor:</strong> ${escapeHtml(entry.actor)}</div>
+                        <div><strong>Actor:</strong> ${escapeHtml(actorLabel)}</div>
                         ${detailsHtml}
                     </div>
                 </div>
@@ -273,6 +312,79 @@ async function loadAuditLog() {
         timeline.innerHTML = renderEmptyState('Failed to load audit log', 'blocked');
         countEl.textContent = '';
     }
+}
+
+function getAuditEventConfig(eventType) {
+    const config = AUDIT_EVENT_CONFIG[eventType];
+    if (config) {
+        return config;
+    }
+
+    return {
+        code: 'EV',
+        tone: '',
+        class: '',
+        label: formatEventType(eventType || 'event')
+    };
+}
+
+function renderAuditLegend() {
+    const entries = Object.values(AUDIT_EVENT_CONFIG).map((config) => `
+        <div class="audit-legend-entry">
+            ${renderEventChip(config.code, config.tone)}
+            <div class="audit-legend-copy">
+                <div class="audit-legend-label">${escapeHtml(config.label)}</div>
+            </div>
+        </div>
+    `).join('');
+
+    return `
+        <div class="audit-legend ${auditState.legendCollapsed ? 'is-collapsed' : ''}" id="audit-legend">
+            <button class="btn btn-secondary audit-legend-trigger" type="button" id="audit-legend-open">Event Key</button>
+            <aside class="audit-legend-panel">
+                <div class="audit-legend-head">
+                    <div>
+                        <div class="card-title">Event Key</div>
+                        <div class="surface-section-copy">What the short audit chips mean.</div>
+                    </div>
+                    <button class="audit-legend-close" type="button" id="audit-legend-close">Hide</button>
+                </div>
+                <div class="audit-legend-grid">
+                    ${entries}
+                    <div class="audit-legend-entry">
+                        ${renderEventChip('EV')}
+                        <div class="audit-legend-copy">
+                            <div class="audit-legend-label">Generic Audit Event</div>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+        </div>
+    `;
+}
+
+function initAuditLegend() {
+    const openButton = document.getElementById('audit-legend-open');
+    const closeButton = document.getElementById('audit-legend-close');
+
+    if (openButton) {
+        openButton.addEventListener('click', () => setAuditLegendCollapsed(false));
+    }
+
+    if (closeButton) {
+        closeButton.addEventListener('click', () => setAuditLegendCollapsed(true));
+    }
+}
+
+function setAuditLegendCollapsed(collapsed) {
+    auditState.legendCollapsed = Boolean(collapsed);
+
+    const legend = document.getElementById('audit-legend');
+    if (!legend) {
+        return;
+    }
+
+    legend.classList.toggle('is-collapsed', auditState.legendCollapsed);
 }
 
 function formatAuditDetails(entry) {
@@ -297,9 +409,29 @@ function formatAuditDetails(entry) {
     }
     
     if (details.approver) {
-        html += `<div><strong>Approver:</strong> ${escapeHtml(details.approver)}</div>`;
+        html += `<div><strong>Approver:</strong> ${escapeHtml(isSystemAutoApprover(details.approver) ? 'Niyam Auto Approver' : details.approver)}</div>`;
     }
-    
+
+    if (details.authMode) {
+        html += `<div><strong>Auth Mode:</strong> ${escapeHtml(details.authMode)}</div>`;
+    }
+
+    if (details.approvalMode) {
+        html += `<div><strong>Approval Mode:</strong> ${escapeHtml(details.approvalMode)}</div>`;
+    }
+
+    if (details.autoApproval !== undefined) {
+        html += `<div><strong>Auto Approval:</strong> ${details.autoApproval ? 'Enabled' : 'Disabled'}</div>`;
+    }
+
+    if (details.credentialLabel) {
+        html += `<div><strong>Via:</strong> ${escapeHtml(details.credentialLabel)}</div>`;
+    }
+
+    if (details.subjectType) {
+        html += `<div><strong>Subject Type:</strong> ${escapeHtml(details.subjectType)}</div>`;
+    }
+
     if (details.rationale) {
         html += `<div><strong>Rationale:</strong> ${escapeHtml(details.rationale)}</div>`;
     }
@@ -314,6 +446,26 @@ function formatAuditDetails(entry) {
     
     if (details.route) {
         html += `<div><strong>Route:</strong> ${escapeHtml(details.route)}</div>`;
+    }
+
+    if (details.label) {
+        html += `<div><strong>Token Label:</strong> ${escapeHtml(details.label)}</div>`;
+    }
+
+    if (details.scope) {
+        html += `<div><strong>Scope:</strong> ${escapeHtml(details.scope)}</div>`;
+    }
+
+    if (details.subject) {
+        html += `<div><strong>Subject:</strong> ${escapeHtml(details.subject)}</div>`;
+    }
+
+    if (details.principalIdentifier) {
+        html += `<div><strong>Identity:</strong> ${escapeHtml(details.principalIdentifier)}</div>`;
+    }
+
+    if (details.userId) {
+        html += `<div><strong>Linked User ID:</strong> <code style="color:var(--accent-cyan)">${escapeHtml(details.userId)}</code></div>`;
     }
 
     if (details.shell) {
@@ -353,6 +505,19 @@ function formatAuditCommandLine(details) {
         : [];
 
     return [String(details.command).trim(), ...args].filter(Boolean).join(' ').trim();
+}
+
+function describeAuditActor(entry) {
+    const details = entry.details || {};
+    if (details.credentialLabel && details.credentialLabel !== entry.actor) {
+        return `${entry.actor} via ${details.credentialLabel}`;
+    }
+
+    if (isSystemAutoApprover(entry.actor)) {
+        return 'Niyam Auto Approver';
+    }
+
+    return entry.actor;
 }
 
 function renderAuditPagination(currentCount) {

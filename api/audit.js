@@ -77,8 +77,15 @@ function createAuditRouter(db) {
             ORDER BY count DESC 
             LIMIT 10
         `).all();
+
+        const allActors = db.prepare(`
+            SELECT actor
+            FROM audit_log
+            GROUP BY actor
+            ORDER BY actor COLLATE NOCASE ASC
+        `).all();
         
-        res.json({ eventTypes, recentActivity, topActors });
+        res.json({ eventTypes, recentActivity, topActors, allActors });
     });
 
     // Export audit log as JSON

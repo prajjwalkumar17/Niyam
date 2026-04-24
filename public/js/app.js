@@ -7,8 +7,11 @@ const state = {
     currentPage: 'dashboard',
     ws: null,
     principal: null,
+    authentication: null,
     authConfig: {
-        allowSelfSignup: false
+        allowSelfSignup: false,
+        productMode: 'individual',
+        profile: null
     },
     initialized: false,
     wsReconnectTimer: null,
@@ -41,7 +44,7 @@ const ICONS = {
     package: '<svg viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Zm0 0v9m8-4.5-8 4.5-8-4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 };
 
-const ALL_PAGES = ['dashboard', 'workspace', 'pending', 'history', 'dispatches', 'rules', 'audit', 'users'];
+const ALL_PAGES = ['dashboard', 'workspace', 'pending', 'history', 'rules', 'audit', 'users'];
 const DEFAULT_USER_PAGES = ['dashboard', 'workspace', 'pending', 'history'];
 
 function renderUiIcon(name, className = '') {
@@ -71,6 +74,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function bootstrapApp() {
     await loadAuthConfig();
+    updateModeLabels();
     initAuthUi();
     updateAutoRefreshButton();
 
@@ -135,8 +139,41 @@ async function loadAuthConfig() {
             ...state.authConfig,
             ...result
         };
+        updateModeLabels();
     } catch (error) {
         // Leave defaults in place.
+    }
+}
+
+async function openTokenShellFromDashboard(token, label, statusElementId = null) {
+    const statusElement = statusElementId ? document.getElementById(statusElementId) : null;
+    if (statusElement) {
+        statusElement.textContent = 'Opening a local shell...';
+    }
+
+    try {
+        const response = await apiFetch('/cli/open-shell', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token })
+        });
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.error || result.details?.join(', ') || 'Failed to open a shell');
+        }
+
+        if (statusElement) {
+            statusElement.textContent = `Opened ${result.terminalApp} using ${result.shell}.`;
+        }
+        showNotification(`Opened ${result.terminalApp} for ${label}`, 'success');
+        return result;
+    } catch (error) {
+        if (statusElement) {
+            statusElement.textContent = error.message || 'Failed to open a shell';
+        }
+        showNotification(error.message || 'Failed to open a shell', 'error');
+        throw error;
     }
 }
 
@@ -148,15 +185,16 @@ async function restoreSession() {
         }
 
         const result = await response.json();
-        enterAuthenticatedState(result.principal);
+        enterAuthenticatedState(result.principal, result.authentication);
         return true;
     } catch (error) {
         return false;
     }
 }
 
-function enterAuthenticatedState(principal) {
+function enterAuthenticatedState(principal, authentication = null) {
     state.principal = principal;
+    state.authentication = authentication;
     hideLoginOverlay();
     updateSessionUi();
     updateNavigationForPrincipal();
@@ -194,6 +232,7 @@ function enterAuthenticatedState(principal) {
 
 function enterUnauthenticatedState(message) {
     state.principal = null;
+    state.authentication = null;
     updateSessionUi();
     updateNavigationForPrincipal();
     closeApprovalModal();
@@ -274,7 +313,7 @@ async function submitLogin() {
             return;
         }
 
-        enterAuthenticatedState(result.principal);
+        enterAuthenticatedState(result.principal, result.authentication);
         showNotification('Signed in', 'success');
     } catch (error) {
         setLoginStatus('Network error while signing in.');
@@ -383,7 +422,7 @@ async function submitPasswordChange() {
         }
 
         closePasswordModal();
-        enterAuthenticatedState(result.principal);
+        enterAuthenticatedState(result.principal, result.authentication);
         showNotification('Password updated', 'success');
     } catch (error) {
         document.getElementById('password-status').textContent = 'Network error while changing password.';
@@ -403,6 +442,10 @@ async function apiFetch(path, options = {}) {
 }
 
 function navigateTo(page) {
+    if (page === 'dispatches') {
+        page = 'history';
+    }
+
     if (!getAllowedPages(state.principal).includes(page)) {
         page = 'dashboard';
     }
@@ -425,11 +468,11 @@ function navigateTo(page) {
         dashboard: 'Dashboard',
         workspace: 'Workspace',
         pending: 'Pending Approvals',
-        history: 'Command History',
-        dispatches: 'Shell Dispatches',
+        history: 'Activity',
+        dispatches: 'Activity',
         rules: 'Policy Rules',
         audit: 'Audit Log',
-        users: 'Users'
+        users: state.authConfig.productMode === 'individual' ? 'Tokens' : 'Users'
     };
     document.getElementById('page-title').textContent = titles[page] || page;
     
@@ -442,7 +485,7 @@ function navigateTo(page) {
         case 'workspace': renderWorkspace(container); break;
         case 'pending': renderPending(container); break;
         case 'history': renderHistory(container); break;
-        case 'dispatches': renderDispatches(container); break;
+        case 'dispatches': renderHistory(container); break;
         case 'rules': renderRules(container); break;
         case 'audit': renderAudit(container); break;
         case 'users': renderUsers(container); break;
@@ -489,20 +532,20 @@ function toggleAutoRefresh() {
 
     if (state.autoRefreshEnabled) {
         startAutoRefresh();
-        showNotification('Auto-refresh enabled', 'success');
+        showNotification('Refresh enabled', 'success');
     } else {
         if (state.refreshInterval) clearInterval(state.refreshInterval);
         if (state.timerInterval) clearInterval(state.timerInterval);
         state.refreshInterval = null;
         state.timerInterval = null;
-        showNotification('Auto-refresh paused', 'warning');
+        showNotification('Refresh paused', 'warning');
     }
 }
 
 function updateAutoRefreshButton() {
     const btn = document.getElementById('auto-refresh-toggle');
     if (!btn) return;
-    btn.innerHTML = `${renderUiIcon('activity', 'btn-icon')}Auto: ${state.autoRefreshEnabled ? 'ON' : 'OFF'}`;
+    btn.innerHTML = `${renderUiIcon('activity', 'btn-icon')}Refresh: ${state.autoRefreshEnabled ? 'ON' : 'OFF'}`;
 }
 
 function silentlyRefreshCurrentPage() {
@@ -522,7 +565,7 @@ function silentlyRefreshCurrentPage() {
         case 'workspace': renderWorkspace(container); break;
         case 'pending': renderPending(container); break;
         case 'history': renderHistory(container); break;
-        case 'dispatches': renderDispatches(container); break;
+        case 'dispatches': renderHistory(container); break;
         case 'rules': renderRules(container); break;
         case 'audit': renderAudit(container); break;
         case 'users': renderUsers(container); break;
@@ -959,10 +1002,18 @@ async function submitCommand() {
         
         if (response.ok) {
             const riskLabel = result.riskLevel || 'MEDIUM';
-            const msg = result.autoApproved
-                ? `Command auto-approved (${riskLabel})`
-                : `Command submitted, awaiting approval (${riskLabel})`;
-            showNotification(msg, result.autoApproved ? 'success' : 'info');
+            let msg = `Command submitted, awaiting approval (${riskLabel})`;
+            let tone = 'info';
+            if (result.approvalMode === 'auto_agent_approved') {
+                msg = `Command auto-approved by Niyam Auto Approver (${riskLabel})`;
+                tone = 'success';
+            } else if (result.autoApproved) {
+                msg = `Command auto-approved (${riskLabel})`;
+                tone = 'success';
+            } else if (result.approvalMode === 'auto_agent_pending') {
+                msg = `Command submitted with auto-approval assist (${riskLabel})`;
+            }
+            showNotification(msg, tone);
             closeModal();
             navigateTo(state.currentPage);
         } else {
@@ -1056,6 +1107,60 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+function shouldShowCredentialLabel(actor, authenticationContext) {
+    if (!authenticationContext || !authenticationContext.credentialLabel) {
+        return false;
+    }
+
+    return authenticationContext.credentialLabel !== actor;
+}
+
+function isSystemAutoApprover(actor) {
+    return String(actor || '').trim() === 'niyam-auto-approver';
+}
+
+function hasAutoApprovalAssist(record) {
+    const approvedBy = Array.isArray(record && record.approvedBy) ? record.approvedBy : [];
+    if (approvedBy.includes('niyam-auto-approver')) {
+        return true;
+    }
+
+    const approvalMode = String(record && record.approvalMode || '').trim();
+    return approvalMode.startsWith('auto_agent');
+}
+
+function renderApprovalAutomationMetaPill(record) {
+    if (!hasAutoApprovalAssist(record)) {
+        return '';
+    }
+
+    const label = String(record.status || '').toLowerCase() === 'approved'
+        ? 'Auto approved'
+        : 'Auto approval active';
+    return `<span class="command-stream-meta-pill">${escapeHtml(label)}</span>`;
+}
+
+function describeActorWithAuth(actor, authenticationContext) {
+    const label = String(actor || '').trim();
+    if (!label) {
+        return '';
+    }
+
+    if (shouldShowCredentialLabel(label, authenticationContext)) {
+        return `${label} via ${authenticationContext.credentialLabel}`;
+    }
+
+    return label;
+}
+
+function renderAuthenticationMetaPill(actor, authenticationContext) {
+    if (!shouldShowCredentialLabel(actor, authenticationContext)) {
+        return '';
+    }
+
+    return `<span class="command-stream-meta-pill">Via · ${escapeHtml(authenticationContext.credentialLabel)}</span>`;
+}
+
 function parseArgsInput(argsStr) {
     return argsStr ? argsStr.split(',').map(arg => arg.trim()).filter(Boolean) : [];
 }
@@ -1099,13 +1204,14 @@ function renderApprovalContext(command) {
     detail.innerHTML = `
         <div class="command-detail">
             <div style="margin-bottom:10px"><strong>Command:</strong> <code>${escapeHtml(buildCommandLineDisplay(command))}</code></div>
-            <div style="margin-bottom:8px"><strong>Requester:</strong> ${escapeHtml(command.requester)}</div>
+            <div style="margin-bottom:8px"><strong>Requester:</strong> ${escapeHtml(describeActorWithAuth(command.requester, command.authenticationContext))}</div>
             <div style="margin-bottom:8px"><strong>Risk:</strong> <span class="risk-badge ${String(command.risk_level || 'medium').toLowerCase()}">${escapeHtml(command.risk_level || 'MEDIUM')}</span></div>
             <div style="margin-bottom:8px"><strong>Progress:</strong> ${escapeHtml(formatApprovalProgress(command))}</div>
             <div style="margin-bottom:8px"><strong>Approved by:</strong> ${approvedBy.length > 0 ? escapeHtml(approvedBy.join(', ')) : 'No approvals yet'}</div>
             ${command.rejectedBy ? `<div style="margin-bottom:8px"><strong>Rejected by:</strong> ${escapeHtml(command.rejectedBy)}</div>` : ''}
             ${command.timeout_at ? `<div style="margin-bottom:8px"><strong>Approval window:</strong> ${escapeHtml(formatTimeout(command.timeout_at))}</div>` : ''}
-            ${command.approvalProgress && !command.approvalProgress.twoPersonSatisfied ? '<div class="text-sm text-muted" style="margin-top:10px">Waiting for one more distinct approver to satisfy the two-person rule.</div>' : ''}
+            ${hasAutoApprovalAssist(command) ? '<div class="text-sm text-muted" style="margin-top:10px">Auto approval assist is active for this command.</div>' : ''}
+            ${command.approvalProgress && !command.approvalProgress.twoPersonSatisfied ? `<div class="text-sm text-muted" style="margin-top:10px">${escapeHtml(formatHighRiskPendingMessage(command))}</div>` : ''}
             ${blockReason ? `<div class="text-sm text-muted" style="margin-top:10px;color:var(--accent-red)">${escapeHtml(blockReason)}</div>` : ''}
         </div>
     `;
@@ -1119,6 +1225,7 @@ function updateNavigationForPrincipal() {
         const adminOnly = link.dataset.adminOnly === 'true';
         link.style.display = !adminOnly || isAdminPrincipal(state.principal) ? '' : 'none';
     });
+    updateModeLabels();
 }
 
 function getAllowedPages(principal) {
@@ -1143,7 +1250,24 @@ function describePrincipal(principal) {
     const context = roles.includes('admin')
         ? 'admin'
         : (roles.includes('approver') ? 'approver' : principal.type);
-    return `${label} · ${context}`;
+    const viaLabel = state.authentication && shouldShowCredentialLabel(principal.identifier, state.authentication)
+        ? ` via ${state.authentication.credentialLabel}`
+        : '';
+    return `${label}${viaLabel} · ${context}`;
+}
+
+function updateModeLabels() {
+    const usersNavText = document.querySelector('.nav-link[data-page="users"] .nav-text');
+    if (usersNavText) {
+        usersNavText.textContent = state.authConfig.productMode === 'individual' ? 'Tokens' : 'Users';
+    }
+
+    if (state.currentPage === 'users') {
+        const pageTitle = document.getElementById('page-title');
+        if (pageTitle) {
+            pageTitle.textContent = state.authConfig.productMode === 'individual' ? 'Tokens' : 'Users';
+        }
+    }
 }
 
 function getApprovalBlockReason(command) {
@@ -1188,7 +1312,14 @@ function formatApprovalProgress(command) {
     };
     const base = `${progress.count}/${progress.required} approvals`;
     if (command.risk_level === 'HIGH' && !progress.twoPersonSatisfied) {
-        return `${base} · waiting for distinct approver`;
+        return `${base} · ${formatHighRiskPendingMessage(command)}`;
     }
     return progress.remaining > 0 ? `${base} · ${progress.remaining} remaining` : `${base} · ready`;
+}
+
+function formatHighRiskPendingMessage(command) {
+    if (hasAutoApprovalAssist(command)) {
+        return 'waiting for one human approver';
+    }
+    return 'waiting for distinct approver';
 }

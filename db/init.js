@@ -9,6 +9,7 @@ const { v4: uuidv4 } = require('uuid');
 
 const { config } = require('../config');
 const { runMigrations } = require('./migrations');
+const { ensureProductModeLock } = require('./runtime-settings');
 const { createUsersService } = require('../services/users');
 
 const DB_PATH = config.DB_PATH;
@@ -37,6 +38,7 @@ function initializeDatabase() {
     seedRules(db);
     seedLocalUsers(db);
     seedApprovers(db);
+    ensureProductModeLock(db);
     
     db.close();
     console.log('Database initialization complete');
@@ -193,25 +195,32 @@ function seedApprovers(db) {
     const defaultApprovers = [
         {
             id: uuidv4(),
-            name: 'Default Agent',
+            name: 'Niyam Auto Approver',
             type: 'agent',
-            identifier: Object.keys(config.AGENT_TOKENS)[0] || 'niyam-agent',
+            identifier: 'niyam-auto-approver',
             can_approve_high: 1,
-            can_approve_medium: 1
+            can_approve_medium: 1,
+            metadata: JSON.stringify({
+                managedBy: 'system',
+                purpose: 'auto_approval'
+            })
         }
     ];
     
     const existingIdentifiers = new Set(db.prepare('SELECT identifier FROM approvers').all().map(approver => approver.identifier));
     const insertApprover = db.prepare(`
-        INSERT INTO approvers (id, name, type, identifier, enabled, can_approve_high, can_approve_medium, created_at)
-        VALUES (@id, @name, @type, @identifier, 1, @can_approve_high, @can_approve_medium, ?)
+        INSERT INTO approvers (id, name, type, identifier, enabled, can_approve_high, can_approve_medium, created_at, metadata)
+        VALUES (@id, @name, @type, @identifier, 1, @can_approve_high, @can_approve_medium, ?, @metadata)
     `);
     
     for (const approver of defaultApprovers) {
         if (existingIdentifiers.has(approver.identifier)) {
             continue;
         }
-        insertApprover.run(approver, now);
+        insertApprover.run({
+            ...approver,
+            metadata: approver.metadata || null
+        }, now);
     }
     
     console.log(`Seeded ${defaultApprovers.length} default approvers`);

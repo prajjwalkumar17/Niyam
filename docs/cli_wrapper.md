@@ -34,12 +34,17 @@ niyam-cli: completed <command-id>
 
 The wrapper supports two auth modes.
 
+Precedence is:
+
+1. local user session cookie
+2. managed token
+
 ### 1. Local User Session
 
 Use this when a real person should appear in the dashboard as themselves.
 
 ```bash
-node /Users/prajjwal.kumar/Projects/Niyam/bin/niyam-cli.js login --username alice --password 'secret'
+niyam-cli login --username alice --password 'secret'
 ```
 
 When `status` shows:
@@ -51,24 +56,28 @@ Principal: alice · user
 
 then CLI-originated commands appear in Niyam as `alice`.
 
-### 2. Agent Token
+### 2. Managed Token
 
-Use this for bots, shared automation, or single-user local testing.
+Use this when the dashboard should record the effective identity plus the specific CLI or workflow label.
 
-This mode uses:
+Examples:
 
-- `NIYAM_CLI_BASE_URL`
-- `NIYAM_AGENT_TOKEN`
-- `NIYAM_CLI_REQUESTER`
+- standalone token in `individual` mode: `June`
+- user-linked token in `teams` mode: `alice via Cursor CLI`
+
+```bash
+niyam-cli login --token '<token>'
+```
 
 When `status` shows:
 
 ```text
-Auth mode: agent-token
-Principal: niyam-agent · agent
+Auth mode: managed-token
+Principal: alice · user
+Token label: Cursor CLI
 ```
 
-then CLI-originated commands appear as that agent identity.
+then CLI-originated commands still belong to `alice`, but central audit also keeps the token label.
 
 ## Install Commands
 
@@ -99,19 +108,25 @@ niyam-on
 Check wrapper status:
 
 ```bash
-node /Users/prajjwal.kumar/Projects/Niyam/bin/niyam-cli.js status
+niyam-cli status
 ```
 
 Sign in as a local dashboard user:
 
 ```bash
-node /Users/prajjwal.kumar/Projects/Niyam/bin/niyam-cli.js login --username <user> --password '<password>'
+niyam-cli login --username <user> --password '<password>'
 ```
 
-Sign out of the local user session:
+Sign in with a managed token:
 
 ```bash
-node /Users/prajjwal.kumar/Projects/Niyam/bin/niyam-cli.js logout
+niyam-cli login --token '<token>'
+```
+
+Clear saved session or managed-token auth:
+
+```bash
+niyam-cli logout
 ```
 
 Turn interception off in the current shell:
@@ -126,6 +141,14 @@ Turn interception back on in the current shell:
 niyam-on
 ```
 
+Bypass Niyam for one command without turning the wrapper off:
+
+```bash
+git status --skip-niyam
+```
+
+The wrapper strips `--skip-niyam` and runs that command directly in the local shell.
+
 Remove the wrapper from the shell config:
 
 ```bash
@@ -138,7 +161,7 @@ Fully uninstall and purge saved CLI config:
 
 ```bash
 cd /Users/prajjwal.kumar/Projects/Niyam
-node bin/niyam-cli.js uninstall --purge-config
+niyam-cli uninstall --purge-config
 source ~/.zshrc
 ```
 
@@ -147,29 +170,39 @@ source ~/.zshrc
 For a human operator:
 
 1. Install the wrapper once
-2. Log into the CLI as a local user
+2. In `teams` mode, create a token from `Workspace > My CLI Tokens`
+3. Log into the CLI with `login --token`
+4. Use the shell normally
+5. Check `status` if command identity looks wrong
+
+For a human operator who explicitly wants password-session auth:
+
+1. Install the wrapper once
+2. Log into the CLI as a local user with username and password
 3. Use the shell normally
 4. Check `status` if command identity looks wrong
 
 For a bot or shared automation shell:
 
 1. Install the wrapper once
-2. Configure agent-token env vars
-3. Do not run `niyam-cli login`
-4. Use the shell in shared agent mode
+2. Create a standalone managed token for that automation identity
+3. Log into the CLI with `login --token`
+4. Use the shell in managed-token mode
 
 ## Troubleshooting
 
 If commands are showing as the wrong identity:
 
 ```bash
-node /Users/prajjwal.kumar/Projects/Niyam/bin/niyam-cli.js status
+niyam-cli status
 ```
 
 Check:
 
 - `Auth mode`
 - `Principal`
+- `Managed token`
+- `Token label`
 - `Base URL`
 
 If a remote user is pointing at `http://127.0.0.1:3000`, that is wrong unless they are on the server machine. Remote developer machines must point at a shared reachable URL.

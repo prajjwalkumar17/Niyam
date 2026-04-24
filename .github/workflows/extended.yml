@@ -1,0 +1,73 @@
+name: extended
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '15 2 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-compat:
+    name: deploy and packaging (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: NIYAM_TEST_ARTIFACT_ROOT="$RUNNER_TEMP/deploy" npm run verify:deploy
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: deploy-artifacts-${{ matrix.os }}
+          path: ${{ runner.temp }}/deploy
+
+  oneclick-extended:
+    name: oneclick extended (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: NIYAM_TEST_ARTIFACT_ROOT="$RUNNER_TEMP/oneclick-extended" npm run verify:oneclick
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: oneclick-extended-artifacts-${{ matrix.os }}
+          path: ${{ runner.temp }}/oneclick-extended
+
+  perf-reduced:
+    name: reduced perf
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: NIYAM_TEST_ARTIFACT_ROOT="$RUNNER_TEMP/perf" npm run test:perf
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: perf-artifacts
+          path: ${{ runner.temp }}/perf

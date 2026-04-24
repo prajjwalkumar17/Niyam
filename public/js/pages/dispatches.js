@@ -7,7 +7,7 @@ function renderDispatches(container) {
         <section class="workspace-header fade-in">
             <div class="workspace-header-copy">
                 <div class="workspace-kicker">Shell Dispatches</div>
-                <p class="workspace-subtitle">Review intercepted interactive shell commands, including local passthrough decisions and linked governed executions.</p>
+                <p class="workspace-subtitle">Dispatches are the raw shell lines Niyam intercepted before it decided to run them as governed commands, allow them locally, or block them.</p>
             </div>
             <div class="workspace-controls">
                 <select class="filter-select" id="dispatch-route-filter">
@@ -24,6 +24,39 @@ function renderDispatches(container) {
                     <option value="local_completed">Local Completed</option>
                     <option value="local_failed">Local Failed</option>
                 </select>
+            </div>
+        </section>
+        <section class="surface-grid-2 fade-in">
+            <div class="surface-card">
+                <div class="surface-section-head">
+                    <div>
+                        <div class="card-title">What A Dispatch Is</div>
+                        <div class="surface-section-copy">Every command typed in a wrapped shell creates a dispatch first. It is the interception record before Niyam decides what to do next.</div>
+                    </div>
+                </div>
+                <div class="surface-section-copy">If Niyam turns that shell line into a governed command, you will also see it in Pending, History, and Audit. If Niyam lets it stay local, this page is the main record of that decision.</div>
+            </div>
+            <div class="surface-card">
+                <div class="surface-section-head">
+                    <div>
+                        <div class="card-title">How To Read Routes</div>
+                        <div class="surface-section-copy">The route tells you what Niyam decided to do with the intercepted shell line.</div>
+                    </div>
+                </div>
+                <div style="display:grid;gap:12px">
+                    <div>
+                        <span class="status-badge approved">Remote Exec</span>
+                        <div class="surface-section-copy">Niyam created a governed command and sent it through policy, approvals, and execution tracking.</div>
+                    </div>
+                    <div>
+                        <span class="status-badge pending">Local Passthrough</span>
+                        <div class="surface-section-copy">Niyam observed the shell line but allowed it to stay local in the user shell instead of creating a governed command.</div>
+                    </div>
+                    <div>
+                        <span class="status-badge rejected">Blocked</span>
+                        <div class="surface-section-copy">Niyam stopped the shell line before execution because a rule or policy denied it.</div>
+                    </div>
+                </div>
             </div>
         </section>
         <section class="surface-section fade-in">
@@ -73,15 +106,16 @@ async function loadDispatchesPage() {
                             ${dispatch.redacted ? '<span class="status-badge rejected">Redacted</span>' : ''}
                         </div>
                         <div class="command-stream-title"><code>${escapeHtml(dispatch.command)}</code></div>
-                        <div class="command-stream-subtitle">${escapeHtml(dispatch.requester)} · ${timeAgo(dispatch.created_at)} · ${escapeHtml(dispatch.shell || 'unknown shell')}</div>
+                        <div class="command-stream-subtitle">${escapeHtml(describeActorWithAuth(dispatch.requester, dispatch.authenticationContext))} · ${timeAgo(dispatch.created_at)} · ${escapeHtml(dispatch.shell || 'unknown shell')}</div>
                     </div>
                     <div class="command-stream-side">
                         <div class="history-exit-code">${renderDispatchOutcome(dispatch)}</div>
                     </div>
                 </div>
                 <div class="command-stream-meta-row">
-                    <span class="command-stream-meta-pill">Token · ${escapeHtml(dispatch.first_token || 'n/a')}</span>
-                    <span class="command-stream-meta-pill">Type · ${escapeHtml(dispatch.first_token_type || 'unknown')}</span>
+                    ${renderAuthenticationMetaPill(dispatch.requester, dispatch.authenticationContext)}
+                    <span class="command-stream-meta-pill">First shell token · ${escapeHtml(dispatch.first_token || 'n/a')}</span>
+                    <span class="command-stream-meta-pill">First shell token type · ${escapeHtml(dispatch.first_token_type || 'unknown')}</span>
                     ${dispatch.command_id ? `<span class="command-stream-meta-pill">Command · ${escapeHtml(dispatch.command_id)}</span>` : ''}
                     ${dispatch.working_dir ? `<span class="command-stream-meta-pill">Dir · ${escapeHtml(dispatch.working_dir)}</span>` : ''}
                     ${dispatch.execution_mode ? `<span class="command-stream-meta-pill">Mode · ${escapeHtml(dispatch.execution_mode)}</span>` : ''}
@@ -107,8 +141,8 @@ async function showDispatchDetail(dispatchId) {
                 <div style="margin-bottom:8px"><strong>Route:</strong> <span class="status-badge ${dispatchBadgeTone(dispatch.route)}">${formatDispatchRoute(dispatch.route)}</span></div>
                 <div style="margin-bottom:8px"><strong>Status:</strong> <span class="status-badge ${dispatchStatusTone(dispatch.status)}">${escapeHtml(dispatch.status)}</span></div>
                 <div style="margin-bottom:8px"><strong>Shell:</strong> ${escapeHtml(dispatch.shell || 'unknown')}</div>
-                <div style="margin-bottom:8px"><strong>Requester:</strong> ${escapeHtml(dispatch.requester)}</div>
-                <div style="margin-bottom:8px"><strong>First token:</strong> ${escapeHtml(dispatch.first_token || 'n/a')} · ${escapeHtml(dispatch.first_token_type || 'unknown')}</div>
+                <div style="margin-bottom:8px"><strong>Requester:</strong> ${escapeHtml(describeActorWithAuth(dispatch.requester, dispatch.authenticationContext))}</div>
+                <div style="margin-bottom:8px"><strong>First shell token:</strong> ${escapeHtml(dispatch.first_token || 'n/a')} · ${escapeHtml(dispatch.first_token_type || 'unknown')}</div>
                 ${dispatch.reason ? `<div style="margin-bottom:8px"><strong>Reason:</strong> ${escapeHtml(dispatch.reason)}</div>` : ''}
                 ${dispatch.working_dir ? `<div style="margin-bottom:8px"><strong>Working dir:</strong> ${escapeHtml(dispatch.working_dir)}</div>` : ''}
                 ${dispatch.command_id ? `<div style="margin-bottom:8px"><strong>Linked command:</strong> <code style="color:var(--accent-cyan)">${escapeHtml(dispatch.command_id)}</code></div>` : ''}

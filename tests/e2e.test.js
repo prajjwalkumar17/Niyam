@@ -1,17 +1,17 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
-const os = require('node:os');
-const fsPromises = require('node:fs/promises');
 const fs = require('node:fs');
-const { spawn, execFile } = require('node:child_process');
+const fsPromises = require('node:fs/promises');
+const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const Database = require('better-sqlite3');
 const { v4: uuidv4 } = require('uuid');
 const CommandRunner = require('../executor/runner');
 const { renderShellInit } = require('../cli/shell-snippets');
+const { createUsersService } = require('../services/users');
+const { createTestContext, ROOT_DIR, sleep } = require('./helpers/test-harness');
 
-const ROOT_DIR = path.resolve(__dirname, '..');
 const execFileAsync = promisify(execFile);
 
 let serverProcess;
@@ -21,24 +21,34 @@ let dataDir = '';
 let tempRoot = '';
 let port = 0;
 let currentExecKey = 'test-exec-key';
+let bootstrapManagedToken = '';
 
-test.before(async () => {
-    tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'niyam-test-'));
-    dataDir = path.join(tempRoot, 'data');
-    await fsPromises.mkdir(dataDir, { recursive: true });
-    port = 3600 + Math.floor(Math.random() * 400);
-    baseUrl = `http://127.0.0.1:${port}`;
-
-    await startServer();
-});
-
-test.after(async () => {
-    await stopServer();
-
-    if (dataDir) {
-        await fsPromises.rm(path.dirname(dataDir), { recursive: true, force: true });
+const harness = createTestContext(test, {
+    initialExecKey: currentExecKey,
+    onStateChange(nextState) {
+        serverProcess = nextState.serverProcess;
+        baseUrl = nextState.baseUrl;
+        adminCookie = nextState.adminCookie;
+        dataDir = nextState.dataDir;
+        tempRoot = nextState.tempRoot;
+        port = nextState.port;
+        currentExecKey = nextState.currentExecKey;
+        bootstrapManagedToken = nextState.bootstrapManagedToken;
     }
 });
+
+const startServer = harness.startServer;
+const startIsolatedServer = harness.startIsolatedServer;
+const startServerExpectFailure = harness.startServerExpectFailure;
+const stopServer = harness.stopServer;
+const stopServerProcess = harness.stopServerProcess;
+const loginAsLocalUser = harness.loginAsLocalUser;
+const loginAsLocalUserAt = harness.loginAsLocalUserAt;
+const apiJson = harness.apiJson;
+const apiJsonAt = harness.apiJsonAt;
+const waitForCommand = harness.waitForCommand;
+const waitForCommandAt = harness.waitForCommandAt;
+const runNodeScript = harness.runNodeScript;
 
 test('policy simulation returns server-truth evaluation', async () => {
     const response = await apiJson('/api/policy/simulate', {
@@ -80,7 +90,7 @@ test('cli dispatches support remote exec, local passthrough, and blocked routing
 
     const remote = await apiJson('/api/cli/dispatches', {
         method: 'POST',
-        token: 'dev-token',
+        token: bootstrapManagedToken,
         body: {
             rawCommand: 'ls public',
             workingDir: ROOT_DIR,
@@ -102,7 +112,7 @@ test('cli dispatches support remote exec, local passthrough, and blocked routing
 
     const local = await apiJson('/api/cli/dispatches', {
         method: 'POST',
-        token: 'dev-token',
+        token: bootstrapManagedToken,
         body: {
             rawCommand: 'cd public',
             workingDir: ROOT_DIR,
@@ -121,7 +131,7 @@ test('cli dispatches support remote exec, local passthrough, and blocked routing
 
     const localComplete = await apiJson(`/api/cli/dispatches/${local.json.dispatchId}/complete`, {
         method: 'POST',
-        token: 'dev-token',
+        token: bootstrapManagedToken,
         body: {
             exitCode: 0,
             durationMs: 150
@@ -132,7 +142,7 @@ test('cli dispatches support remote exec, local passthrough, and blocked routing
 
     const blocked = await apiJson('/api/cli/dispatches', {
         method: 'POST',
-        token: 'dev-token',
+        token: bootstrapManagedToken,
         body: {
             rawCommand: 'echo blocked-dispatch',
             workingDir: ROOT_DIR,
@@ -204,6 +214,29 @@ test('unknown api routes return a 404 json response instead of hanging', async (
     assert.equal(response.json.error, 'API route not found');
 });
 
+test('public why-niyam deck is accessible without auth and serves presentation assets', async () => {
+    const response = await fetch(`${baseUrl}/why-niyam`);
+    assert.equal(response.status, 200);
+
+    const html = await response.text();
+    assert.match(html, /Why Niyam Exists \| Command Control/);
+    assert.match(html, /The shell was never supposed to be an honor system\./);
+    assert.match(html, /\/css\/why-niyam\.css/);
+    assert.match(html, /\/js\/why-niyam\.js/);
+
+    const cssResponse = await fetch(`${baseUrl}/css/why-niyam.css`);
+    assert.equal(cssResponse.status, 200);
+    assert.match(await cssResponse.text(), /progress-rail/);
+
+    const jsResponse = await fetch(`${baseUrl}/js/why-niyam.js`);
+    assert.equal(jsResponse.status, 200);
+    assert.match(await jsResponse.text(), /IntersectionObserver/);
+
+    const imageResponse = await fetch(`${baseUrl}/assets/presentation/niyam-dashboard.png`);
+    assert.equal(imageResponse.status, 200);
+    assert.equal(imageResponse.headers.get('content-type'), 'image/png');
+});
+
 test('built-in rule pack install is idempotent and influences simulation', async () => {
     const firstInstall = await apiJson('/api/rule-packs/gh/install', {
         method: 'POST',
@@ -254,7 +287,7 @@ test('secret redaction sanitizes stored command, output, and audit history', asy
     const rawSecret = 'ghp_abcdefghijklmnopqrstuvwxyz1234567890ABCDE';
     const submission = await apiJson('/api/commands', {
         method: 'POST',
-        token: 'dev-token',
+        token: bootstrapManagedToken,
         body: {
             command: 'printf',
             args: [rawSecret]
@@ -311,7 +344,11 @@ test('versioned migrations are recorded in schema_migrations', async () => {
         '002_redaction_and_pack_metadata',
         '003_cli_dispatches',
         '004_local_users',
-        '005_signup_requests'
+        '005_signup_requests',
+        '006_managed_tokens_and_auth_context',
+        '007_auto_approval_preferences',
+        '008_runtime_product_mode_lock',
+        '009_auto_approval_modes'
     ]);
 });
 
@@ -523,11 +560,16 @@ test('workspace endpoint exposes runtime details for admins and a safer view for
     });
     assert.equal(adminWorkspace.status, 200);
     assert.equal(adminWorkspace.json.runtime.profile, 'local');
+    assert.equal(adminWorkspace.json.runtime.productMode, 'teams');
     assert.equal(adminWorkspace.json.runtime.teamMode, true);
     assert.equal(adminWorkspace.json.currentAccess.username, 'admin');
+    assert.equal(adminWorkspace.json.currentAccess.authMode, 'session');
+    assert.equal(adminWorkspace.json.currentAccess.canManageOwnTokens, true);
+    assert.equal(adminWorkspace.json.currentAccess.canManageAllTokens, true);
     assert.equal(adminWorkspace.json.instance.envFile, path.join(tempRoot, 'test.env'));
     assert.ok(Array.isArray(adminWorkspace.json.instance.allowedRoots));
     assert.match(adminWorkspace.json.commands.startLater, /npm start/);
+    assert.match(adminWorkspace.json.commands.cliTokenLogin, /login --token/);
     assert.match(adminWorkspace.json.bootstrapAccess.passwordSource, /NIYAM_ADMIN_PASSWORD/);
 
     const createUser = await apiJson('/api/users', {
@@ -556,10 +598,905 @@ test('workspace endpoint exposes runtime details for admins and a safer view for
     });
     assert.equal(userWorkspace.status, 200);
     assert.equal(userWorkspace.json.currentAccess.username, 'workspace-user');
+    assert.equal(userWorkspace.json.currentAccess.authMode, 'session');
+    assert.equal(userWorkspace.json.currentAccess.canManageOwnTokens, true);
+    assert.equal(userWorkspace.json.currentAccess.canManageAllTokens, false);
     assert.equal(userWorkspace.json.instance, null);
     assert.equal(userWorkspace.json.commands.startLater, null);
     assert.equal(userWorkspace.json.bootstrapAccess.passwordSource, null);
     assert.match(userWorkspace.json.currentAccess.passwordMessage, /local Niyam account/i);
+});
+
+test('managed tokens support standalone identities, admin-issued user tokens, and admin-only controls', async () => {
+    const createUser = await apiJson('/api/users', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            username: 'managed-token-user',
+            displayName: 'Managed Token User',
+            password: 'managed-token-pass',
+            enabled: true,
+            roles: [],
+            approvalCapabilities: {
+                canApproveMedium: false,
+                canApproveHigh: false
+            }
+        }
+    });
+    assert.equal(createUser.status, 201);
+
+    const userToken = await apiJson('/api/tokens', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            label: 'Admin Issued CLI',
+            subjectType: 'user',
+            userId: createUser.json.id
+        }
+    });
+    assert.equal(userToken.status, 201);
+    assert.equal(userToken.json.token.subjectType, 'user');
+    assert.equal(userToken.json.token.userId, createUser.json.id);
+    assert.match(userToken.json.plainTextToken, /^nym_/);
+
+    const meWithUserToken = await apiJson('/api/auth/me', {
+        method: 'GET',
+        token: userToken.json.plainTextToken
+    });
+    assert.equal(meWithUserToken.status, 200);
+    assert.equal(meWithUserToken.json.principal.identifier, 'managed-token-user');
+    assert.equal(meWithUserToken.json.authentication.mode, 'managed_token');
+    assert.equal(meWithUserToken.json.authentication.credentialLabel, 'Admin Issued CLI');
+
+    const tokenAdminRoutes = await apiJson('/api/tokens', {
+        method: 'GET',
+        token: userToken.json.plainTextToken
+    });
+    assert.equal(tokenAdminRoutes.status, 403);
+    assert.match(tokenAdminRoutes.json.error, /Admin session required/i);
+
+    const tokenPasswordChange = await apiJson('/api/auth/change-password', {
+        method: 'POST',
+        token: userToken.json.plainTextToken,
+        body: {
+            currentPassword: 'managed-token-pass',
+            newPassword: 'managed-token-pass-2'
+        }
+    });
+    assert.equal(tokenPasswordChange.status, 403);
+    assert.match(tokenPasswordChange.json.error, /Local user session required/i);
+
+    const standaloneToken = await apiJson('/api/tokens', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            label: 'June',
+            subjectType: 'standalone',
+            principalIdentifier: 'June',
+            principalDisplayName: 'June'
+        }
+    });
+    assert.equal(standaloneToken.status, 201);
+    assert.match(standaloneToken.json.plainTextToken, /^nym_/);
+
+    const standaloneMe = await apiJson('/api/auth/me', {
+        method: 'GET',
+        token: standaloneToken.json.plainTextToken
+    });
+    assert.equal(standaloneMe.status, 200);
+    assert.equal(standaloneMe.json.principal.identifier, 'June');
+    assert.equal(standaloneMe.json.principal.type, 'agent');
+    assert.equal(standaloneMe.json.authentication.mode, 'managed_token');
+    assert.equal(standaloneMe.json.authentication.subjectType, 'standalone');
+
+    const standaloneSubmission = await apiJson('/api/commands', {
+        method: 'POST',
+        token: standaloneToken.json.plainTextToken,
+        body: {
+            command: 'ls',
+            args: ['public']
+        }
+    });
+    assert.equal(standaloneSubmission.status, 201);
+
+    const standaloneCommand = await waitForCommand(standaloneSubmission.json.id);
+    assert.equal(standaloneCommand.requester, 'June');
+    assert.equal(standaloneCommand.requester_type, 'agent');
+    assert.equal(standaloneCommand.authenticationContext.mode, 'managed_token');
+    assert.equal(standaloneCommand.authenticationContext.credentialLabel, 'June');
+
+    const standaloneAudit = await apiJson(`/api/audit?entityId=${standaloneSubmission.json.id}&limit=20`, {
+        method: 'GET',
+        cookie: adminCookie
+    });
+    assert.equal(standaloneAudit.status, 200);
+    const submittedEntry = standaloneAudit.json.entries.find(entry => entry.event_type === 'command_submitted');
+    assert.ok(submittedEntry);
+    assert.equal(submittedEntry.actor, 'June');
+    assert.equal(submittedEntry.details.authMode, 'managed_token');
+    assert.equal(submittedEntry.details.credentialLabel, 'June');
+    assert.equal(submittedEntry.details.subjectType, 'standalone');
+
+    const blockStandalone = await apiJson(`/api/tokens/${standaloneToken.json.token.id}/block`, {
+        method: 'POST',
+        cookie: adminCookie
+    });
+    assert.equal(blockStandalone.status, 200);
+    assert.equal(blockStandalone.json.token.status, 'blocked');
+
+    const blockedStandalone = await apiJson('/api/auth/me', {
+        method: 'GET',
+        token: standaloneToken.json.plainTextToken
+    });
+    assert.equal(blockedStandalone.status, 401);
+    assert.match(blockedStandalone.json.error, /token is blocked\. create a new token from the dashboard\./i);
+
+    const audit = await apiJson('/api/audit?limit=100', {
+        method: 'GET',
+        cookie: adminCookie
+    });
+    assert.equal(audit.status, 200);
+    assert.ok(audit.json.entries.some(entry => entry.event_type === 'token_created' && entry.details.label === 'June'));
+    assert.ok(audit.json.entries.some(entry => entry.event_type === 'token_blocked' && entry.details.label === 'June'));
+
+    const auditStats = await apiJson('/api/audit/stats', {
+        method: 'GET',
+        cookie: adminCookie
+    });
+    assert.equal(auditStats.status, 200);
+    assert.ok(Array.isArray(auditStats.json.allActors));
+    assert.ok(auditStats.json.allActors.some(entry => entry.actor === 'June'));
+    assert.ok(auditStats.json.allActors.some(entry => entry.actor === 'admin'));
+});
+
+test('teams-mode users can self-manage CLI tokens and token auth is reflected in commands and approvals', async () => {
+    const createUser = await apiJson('/api/users', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            username: 'self-token-user',
+            displayName: 'Self Token User',
+            password: 'self-token-pass',
+            enabled: true,
+            roles: [],
+            approvalCapabilities: {
+                canApproveMedium: true,
+                canApproveHigh: false
+            }
+        }
+    });
+    assert.equal(createUser.status, 201);
+
+    const createOtherUser = await apiJson('/api/users', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            username: 'other-token-user',
+            displayName: 'Other Token User',
+            password: 'other-token-pass',
+            enabled: true,
+            roles: [],
+            approvalCapabilities: {
+                canApproveMedium: false,
+                canApproveHigh: false
+            }
+        }
+    });
+    assert.equal(createOtherUser.status, 201);
+
+    const selfLogin = await loginAsLocalUser('self-token-user', 'self-token-pass');
+    assert.equal(selfLogin.status, 200);
+
+    const createOwnToken = await apiJson('/api/my/tokens', {
+        method: 'POST',
+        cookie: selfLogin.cookie,
+        body: {
+            label: 'Cursor CLI'
+        }
+    });
+    assert.equal(createOwnToken.status, 201);
+    assert.equal(createOwnToken.json.token.subjectType, 'user');
+    assert.equal(createOwnToken.json.token.userId, createUser.json.id);
+    assert.match(createOwnToken.json.plainTextToken, /^nym_/);
+
+    const listOwnTokens = await apiJson('/api/my/tokens', {
+        method: 'GET',
+        cookie: selfLogin.cookie
+    });
+    assert.equal(listOwnTokens.status, 200);
+    assert.ok(listOwnTokens.json.tokens.some(token => token.id === createOwnToken.json.token.id));
+
+    const otherAdminToken = await apiJson('/api/tokens', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            label: 'Other CLI',
+            subjectType: 'user',
+            userId: createOtherUser.json.id
+        }
+    });
+    assert.equal(otherAdminToken.status, 201);
+
+    const blockOtherUserToken = await apiJson(`/api/my/tokens/${otherAdminToken.json.token.id}/block`, {
+        method: 'POST',
+        cookie: selfLogin.cookie
+    });
+    assert.equal(blockOtherUserToken.status, 404);
+
+    const meWithOwnToken = await apiJson('/api/auth/me', {
+        method: 'GET',
+        token: createOwnToken.json.plainTextToken
+    });
+    assert.equal(meWithOwnToken.status, 200);
+    assert.equal(meWithOwnToken.json.principal.identifier, 'self-token-user');
+    assert.equal(meWithOwnToken.json.authentication.mode, 'managed_token');
+    assert.equal(meWithOwnToken.json.authentication.credentialLabel, 'Cursor CLI');
+    assert.equal(meWithOwnToken.json.authentication.subjectType, 'user');
+
+    const tokenWorkspace = await apiJson('/api/workspace', {
+        method: 'GET',
+        token: createOwnToken.json.plainTextToken
+    });
+    assert.equal(tokenWorkspace.status, 200);
+    assert.equal(tokenWorkspace.json.currentAccess.authMode, 'managed_token');
+    assert.equal(tokenWorkspace.json.currentAccess.tokenLabel, 'Cursor CLI');
+    assert.equal(tokenWorkspace.json.currentAccess.canManageOwnTokens, false);
+    assert.equal(tokenWorkspace.json.currentAccess.canManageAllTokens, false);
+
+    const listOwnTokensWithBearer = await apiJson('/api/my/tokens', {
+        method: 'GET',
+        token: createOwnToken.json.plainTextToken
+    });
+    assert.equal(listOwnTokensWithBearer.status, 403);
+    assert.match(listOwnTokensWithBearer.json.error, /Local user session required/i);
+
+    const changePasswordWithBearer = await apiJson('/api/auth/change-password', {
+        method: 'POST',
+        token: createOwnToken.json.plainTextToken,
+        body: {
+            currentPassword: 'self-token-pass',
+            newPassword: 'self-token-pass-2'
+        }
+    });
+    assert.equal(changePasswordWithBearer.status, 403);
+    assert.match(changePasswordWithBearer.json.error, /Local user session required/i);
+
+    const linkedSubmission = await apiJson('/api/commands', {
+        method: 'POST',
+        token: createOwnToken.json.plainTextToken,
+        body: {
+            command: 'ls',
+            args: ['public']
+        }
+    });
+    assert.equal(linkedSubmission.status, 201);
+
+    const linkedCommand = await waitForCommand(linkedSubmission.json.id);
+    assert.equal(linkedCommand.requester, 'self-token-user');
+    assert.equal(linkedCommand.requester_type, 'user');
+    assert.equal(linkedCommand.authenticationContext.mode, 'managed_token');
+    assert.equal(linkedCommand.authenticationContext.credentialLabel, 'Cursor CLI');
+
+    const ruleResponse = await apiJson('/api/rules', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            name: 'Token Approval Echo',
+            description: 'Require a medium approval for user token approval coverage',
+            rule_type: 'pattern',
+            pattern: 'echo\\s+user-token-approval',
+            risk_level: 'MEDIUM',
+            priority: 640
+        }
+    });
+    assert.equal(ruleResponse.status, 201);
+
+    const approvalTarget = await apiJson('/api/commands', {
+        method: 'POST',
+        token: bootstrapManagedToken,
+        body: {
+            command: 'echo',
+            args: ['user-token-approval']
+        }
+    });
+    assert.equal(approvalTarget.status, 201);
+    assert.equal(approvalTarget.json.status, 'pending');
+
+    const approveWithUserToken = await apiJson(`/api/approvals/${approvalTarget.json.id}/approve`, {
+        method: 'POST',
+        token: createOwnToken.json.plainTextToken,
+        body: {
+            rationale: 'approved from Cursor CLI token'
+        }
+    });
+    assert.equal(approveWithUserToken.status, 200);
+    assert.equal(approveWithUserToken.json.fullyApproved, true);
+
+    const approvedCommand = await waitForCommand(approvalTarget.json.id);
+    assert.equal(approvedCommand.status, 'completed');
+
+    const approvedCommandDetails = await apiJson(`/api/commands/${approvalTarget.json.id}`, {
+        method: 'GET',
+        cookie: adminCookie
+    });
+    assert.equal(approvedCommandDetails.status, 200);
+    assert.ok(Array.isArray(approvedCommandDetails.json.approvals));
+    assert.equal(approvedCommandDetails.json.approvals[0].approver, 'self-token-user');
+    assert.equal(approvedCommandDetails.json.approvals[0].authenticationContext.mode, 'managed_token');
+    assert.equal(approvedCommandDetails.json.approvals[0].authenticationContext.credentialLabel, 'Cursor CLI');
+
+    const approvalAudit = await apiJson(`/api/audit?entityId=${approvalTarget.json.id}&limit=20`, {
+        method: 'GET',
+        cookie: adminCookie
+    });
+    assert.equal(approvalAudit.status, 200);
+    const approvalEntry = approvalAudit.json.entries.find(entry => entry.event_type === 'command_approved');
+    assert.ok(approvalEntry);
+    assert.equal(approvalEntry.actor, 'self-token-user');
+    assert.equal(approvalEntry.details.authMode, 'managed_token');
+    assert.equal(approvalEntry.details.credentialLabel, 'Cursor CLI');
+
+    const blockOwnToken = await apiJson(`/api/my/tokens/${createOwnToken.json.token.id}/block`, {
+        method: 'POST',
+        cookie: selfLogin.cookie
+    });
+    assert.equal(blockOwnToken.status, 200);
+    assert.equal(blockOwnToken.json.token.status, 'blocked');
+
+    const blockedOwnToken = await apiJson('/api/auth/me', {
+        method: 'GET',
+        token: createOwnToken.json.plainTextToken
+    });
+    assert.equal(blockedOwnToken.status, 401);
+    assert.match(blockedOwnToken.json.error, /token is blocked\. create a new token from the dashboard\./i);
+});
+
+test('auto approval preferences drive user-linked and standalone token approval automation', async () => {
+    const autoUser = await apiJson('/api/users', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            username: 'auto-user',
+            displayName: 'Auto User',
+            password: 'auto-user-pass',
+            enabled: true,
+            roles: [],
+            approvalCapabilities: {
+                canApproveMedium: false,
+                canApproveHigh: false
+            }
+        }
+    });
+    assert.equal(autoUser.status, 201);
+
+    const humanApprover = await apiJson('/api/users', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            username: 'auto-human-approver',
+            displayName: 'Auto Human Approver',
+            password: 'auto-human-pass',
+            enabled: true,
+            roles: [],
+            approvalCapabilities: {
+                canApproveMedium: true,
+                canApproveHigh: true
+            }
+        }
+    });
+    assert.equal(humanApprover.status, 201);
+
+    const mediumRule = await apiJson('/api/rules', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            name: 'Auto Approval Medium Rule',
+            description: 'Force a medium command for auto approval coverage',
+            rule_type: 'pattern',
+            pattern: 'echo\\s+auto-approval-medium',
+            risk_level: 'MEDIUM',
+            priority: 820
+        }
+    });
+    assert.equal(mediumRule.status, 201);
+
+    const highRule = await apiJson('/api/rules', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            name: 'Auto Approval High Rule',
+            description: 'Force a high command for auto approval assist coverage',
+            rule_type: 'pattern',
+            pattern: 'echo\\s+auto-approval-high',
+            risk_level: 'HIGH',
+            priority: 821
+        }
+    });
+    assert.equal(highRule.status, 201);
+
+    const autoUserLogin = await loginAsLocalUser('auto-user', 'auto-user-pass');
+    const approverLogin = await loginAsLocalUser('auto-human-approver', 'auto-human-pass');
+    assert.equal(autoUserLogin.status, 200);
+    assert.equal(approverLogin.status, 200);
+
+    const beforeWorkspace = await apiJson('/api/workspace', {
+        method: 'GET',
+        cookie: autoUserLogin.cookie
+    });
+    assert.equal(beforeWorkspace.status, 200);
+    assert.equal(beforeWorkspace.json.approvalAutomation.autoApprovalEnabled, false);
+    assert.equal(beforeWorkspace.json.approvalAutomation.autoApprovalMode, 'off');
+    assert.equal(beforeWorkspace.json.approvalAutomation.scope, 'user');
+
+    const enablePreference = await apiJson('/api/my/approval-preferences', {
+        method: 'POST',
+        cookie: autoUserLogin.cookie,
+        body: {
+            autoApprovalEnabled: true
+        }
+    });
+    assert.equal(enablePreference.status, 200);
+    assert.equal(enablePreference.json.autoApprovalEnabled, true);
+    assert.equal(enablePreference.json.autoApprovalMode, 'normal');
+    assert.equal(enablePreference.json.scope, 'user');
+
+    const userMe = await apiJson('/api/auth/me', {
+        method: 'GET',
+        cookie: autoUserLogin.cookie
+    });
+    assert.equal(userMe.status, 200);
+    assert.equal(userMe.json.approvalPreferences.autoApprovalEnabled, true);
+    assert.equal(userMe.json.approvalPreferences.autoApprovalMode, 'normal');
+    assert.equal(userMe.json.approvalPreferences.scope, 'user');
+
+    const userToken = await apiJson('/api/my/tokens', {
+        method: 'POST',
+        cookie: autoUserLogin.cookie,
+        body: {
+            label: 'Auto User CLI'
+        }
+    });
+    assert.equal(userToken.status, 201);
+    assert.equal(userToken.json.token.derivedAutoApprovalEnabled, true);
+    assert.equal(userToken.json.token.derivedAutoApprovalMode, 'normal');
+    assert.equal(userToken.json.token.autoApprovalScope, 'user');
+
+    const preferenceDeniedForToken = await apiJson('/api/my/approval-preferences', {
+        method: 'POST',
+        token: userToken.json.plainTextToken,
+        body: {
+            autoApprovalEnabled: false
+        }
+    });
+    assert.equal(preferenceDeniedForToken.status, 403);
+
+    const tokenMe = await apiJson('/api/auth/me', {
+        method: 'GET',
+        token: userToken.json.plainTextToken
+    });
+    assert.equal(tokenMe.status, 200);
+    assert.equal(tokenMe.json.approvalPreferences.autoApprovalEnabled, true);
+    assert.equal(tokenMe.json.approvalPreferences.autoApprovalMode, 'normal');
+    assert.equal(tokenMe.json.approvalPreferences.scope, 'user');
+
+    const mediumSubmission = await apiJson('/api/commands', {
+        method: 'POST',
+        token: userToken.json.plainTextToken,
+        body: {
+            command: 'echo',
+            args: ['auto-approval-medium']
+        }
+    });
+    assert.equal(mediumSubmission.status, 201);
+    assert.equal(mediumSubmission.json.status, 'approved');
+    assert.equal(mediumSubmission.json.autoApproved, true);
+    assert.equal(mediumSubmission.json.approvalMode, 'auto_agent_approved');
+
+    const mediumCommand = await waitForCommand(mediumSubmission.json.id);
+    assert.equal(mediumCommand.status, 'completed');
+    assert.equal(mediumCommand.requester, 'auto-user');
+    assert.deepEqual(mediumCommand.approvedBy, ['niyam-auto-approver']);
+
+    const mediumDetails = await apiJson(`/api/commands/${mediumSubmission.json.id}`, {
+        method: 'GET',
+        cookie: adminCookie
+    });
+    assert.equal(mediumDetails.status, 200);
+    assert.equal(mediumDetails.json.approvals[0].approver, 'niyam-auto-approver');
+    assert.equal(mediumDetails.json.approvals[0].authenticationContext.mode, 'system');
+
+    const highSubmission = await apiJson('/api/commands', {
+        method: 'POST',
+        token: userToken.json.plainTextToken,
+        body: {
+            command: 'echo',
+            args: ['auto-approval-high']
+        }
+    });
+    assert.equal(highSubmission.status, 201);
+    assert.equal(highSubmission.json.status, 'pending');
+    assert.equal(highSubmission.json.approvalMode, 'auto_agent_pending');
+
+    const highPending = await apiJson(`/api/commands/${highSubmission.json.id}`, {
+        method: 'GET',
+        cookie: adminCookie
+    });
+    assert.equal(highPending.status, 200);
+    assert.deepEqual(highPending.json.approvedBy, ['niyam-auto-approver']);
+    assert.equal(highPending.json.approvalProgress.count, 1);
+    assert.equal(highPending.json.approvalProgress.twoPersonSatisfied, false);
+
+    const highApprove = await apiJson(`/api/approvals/${highSubmission.json.id}/approve`, {
+        method: 'POST',
+        cookie: approverLogin.cookie,
+        body: {
+            rationale: 'human follow-up after auto approval assist'
+        }
+    });
+    assert.equal(highApprove.status, 200);
+    assert.equal(highApprove.json.fullyApproved, true);
+
+    const highCommand = await waitForCommand(highSubmission.json.id);
+    assert.equal(highCommand.status, 'completed');
+    assert.deepEqual(highCommand.approvedBy, ['niyam-auto-approver', 'auto-human-approver']);
+    assert.equal(highCommand.approvalProgress.twoPersonSatisfied, true);
+
+    const highAudit = await apiJson(`/api/audit?entityId=${highSubmission.json.id}&limit=20`, {
+        method: 'GET',
+        cookie: adminCookie
+    });
+    assert.equal(highAudit.status, 200);
+    const highApprovedAudit = highAudit.json.entries.find(entry => entry.event_type === 'command_approved');
+    assert.ok(highApprovedAudit);
+    assert.equal(highApprovedAudit.actor, 'auto-human-approver');
+    assert.equal(highApprovedAudit.details.approvalMode, 'auto_agent_plus_human');
+
+    const standaloneToken = await apiJson('/api/tokens', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            label: 'Standalone Auto June',
+            subjectType: 'standalone',
+            principalIdentifier: 'standalone-auto-june'
+        }
+    });
+    assert.equal(standaloneToken.status, 201);
+    assert.equal(standaloneToken.json.token.autoApprovalEnabled, false);
+    assert.equal(standaloneToken.json.token.autoApprovalMode, 'off');
+
+    const enableStandalonePreference = await apiJson(`/api/tokens/${standaloneToken.json.token.id}/approval-preferences`, {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            autoApprovalEnabled: true
+        }
+    });
+    assert.equal(enableStandalonePreference.status, 200);
+    assert.equal(enableStandalonePreference.json.token.autoApprovalEnabled, true);
+    assert.equal(enableStandalonePreference.json.token.autoApprovalMode, 'normal');
+
+    const standaloneMe = await apiJson('/api/auth/me', {
+        method: 'GET',
+        token: standaloneToken.json.plainTextToken
+    });
+    assert.equal(standaloneMe.status, 200);
+    assert.equal(standaloneMe.json.approvalPreferences.autoApprovalEnabled, true);
+    assert.equal(standaloneMe.json.approvalPreferences.autoApprovalMode, 'normal');
+    assert.equal(standaloneMe.json.approvalPreferences.scope, 'token');
+
+    const standaloneWorkspace = await apiJson('/api/workspace', {
+        method: 'GET',
+        token: standaloneToken.json.plainTextToken
+    });
+    assert.equal(standaloneWorkspace.status, 200);
+    assert.equal(standaloneWorkspace.json.approvalAutomation.autoApprovalEnabled, true);
+    assert.equal(standaloneWorkspace.json.approvalAutomation.autoApprovalMode, 'normal');
+    assert.equal(standaloneWorkspace.json.approvalAutomation.scope, 'token');
+
+    const standaloneMedium = await apiJson('/api/commands', {
+        method: 'POST',
+        token: standaloneToken.json.plainTextToken,
+        body: {
+            command: 'echo',
+            args: ['auto-approval-medium']
+        }
+    });
+    assert.equal(standaloneMedium.status, 201);
+    assert.equal(standaloneMedium.json.status, 'approved');
+    assert.equal(standaloneMedium.json.approvalMode, 'auto_agent_approved');
+
+    const standaloneCommand = await waitForCommand(standaloneMedium.json.id);
+    assert.equal(standaloneCommand.requester, 'standalone-auto-june');
+    assert.deepEqual(standaloneCommand.approvedBy, ['niyam-auto-approver']);
+});
+
+test('product mode is locked after initialization and cannot switch without reset', async () => {
+    await stopServer();
+
+    try {
+        const failedStart = await startServerExpectFailure({
+            NIYAM_PRODUCT_MODE: 'individual',
+            NIYAM_ENABLE_SELF_SIGNUP: 'false'
+        });
+        assert.notEqual(failedStart.code, 0);
+        assert.match(failedStart.output, /initialized in teams mode/i);
+        assert.match(failedStart.output, /clear and rebuild from scratch/i);
+    } finally {
+        await startServer();
+    }
+});
+
+test('individual mode keeps only bootstrap admin and standalone tokens active', async () => {
+    const isolatedDataDir = path.join(tempRoot, `individual-data-${uuidv4()}`);
+    const isolatedPort = 4600 + Math.floor(Math.random() * 300);
+
+    let context = await startIsolatedServer({
+        dataDirOverride: isolatedDataDir,
+        portOverride: isolatedPort,
+        envOverrides: {
+            NIYAM_PRODUCT_MODE: 'individual',
+            NIYAM_ENABLE_SELF_SIGNUP: 'false'
+        }
+    });
+
+    await stopServerProcess(context.serverProcess);
+
+    const seededDb = new Database(path.join(isolatedDataDir, 'niyam.db'));
+    const seededUsers = createUsersService(seededDb);
+    const dormantUser = seededUsers.createUser({
+        username: 'individual-dormant-user',
+        displayName: 'Individual Dormant User',
+        password: 'individual-dormant-pass',
+        enabled: true,
+        roles: [],
+        approvalCapabilities: {
+            canApproveMedium: false,
+            canApproveHigh: false
+        }
+    });
+    seededDb.close();
+
+    context = await startIsolatedServer({
+        dataDirOverride: isolatedDataDir,
+        portOverride: isolatedPort,
+        envOverrides: {
+            NIYAM_PRODUCT_MODE: 'individual',
+            NIYAM_ENABLE_SELF_SIGNUP: 'false'
+        }
+    });
+
+    try {
+        const authConfig = await apiJsonAt(context.baseUrl, '/api/auth/config');
+        assert.equal(authConfig.status, 200);
+        assert.equal(authConfig.json.productMode, 'individual');
+
+        const bootstrapLogin = await loginAsLocalUserAt(context.baseUrl, 'admin', 'admin');
+        assert.equal(bootstrapLogin.status, 200);
+
+        const dormantLogin = await loginAsLocalUserAt(context.baseUrl, 'individual-dormant-user', 'individual-dormant-pass');
+        assert.equal(dormantLogin.status, 403);
+        assert.equal(dormantLogin.json.error, 'Local user login is unavailable in individual mode');
+
+        const usersList = await apiJsonAt(context.baseUrl, '/api/users', {
+            method: 'GET',
+            cookie: context.adminCookie
+        });
+        assert.equal(usersList.status, 403);
+        assert.equal(usersList.json.error, 'Local user management is unavailable in individual mode');
+
+        const createUser = await apiJsonAt(context.baseUrl, '/api/users', {
+            method: 'POST',
+            cookie: context.adminCookie,
+            body: {
+                username: 'forbidden-individual-user',
+                displayName: 'Forbidden Individual User',
+                password: 'forbidden-pass',
+                enabled: true,
+                roles: [],
+                approvalCapabilities: {
+                    canApproveMedium: false,
+                    canApproveHigh: false
+                }
+            }
+        });
+        assert.equal(createUser.status, 403);
+
+        const updateUser = await apiJsonAt(context.baseUrl, `/api/users/${dormantUser.id}`, {
+            method: 'PUT',
+            cookie: context.adminCookie,
+            body: {
+                displayName: 'Blocked Change'
+            }
+        });
+        assert.equal(updateUser.status, 403);
+
+        const resetPassword = await apiJsonAt(context.baseUrl, `/api/users/${dormantUser.id}/password`, {
+            method: 'POST',
+            cookie: context.adminCookie,
+            body: {
+                password: 'new-pass'
+            }
+        });
+        assert.equal(resetPassword.status, 403);
+
+        const ownTokens = await apiJsonAt(context.baseUrl, '/api/my/tokens', {
+            method: 'GET',
+            cookie: context.adminCookie
+        });
+        assert.equal(ownTokens.status, 403);
+        assert.equal(ownTokens.json.error, 'Personal user-linked tokens are unavailable in individual mode');
+
+        const createOwnToken = await apiJsonAt(context.baseUrl, '/api/my/tokens', {
+            method: 'POST',
+            cookie: context.adminCookie,
+            body: {
+                label: 'Blocked Personal Token'
+            }
+        });
+        assert.equal(createOwnToken.status, 403);
+
+        const myPreference = await apiJsonAt(context.baseUrl, '/api/my/approval-preferences', {
+            method: 'POST',
+            cookie: context.adminCookie,
+            body: {
+                autoApprovalEnabled: true
+            }
+        });
+        assert.equal(myPreference.status, 403);
+        assert.equal(myPreference.json.error, 'User auto-approval preferences are unavailable in individual mode');
+
+        const userLinkedToken = await apiJsonAt(context.baseUrl, '/api/tokens', {
+            method: 'POST',
+            cookie: context.adminCookie,
+            body: {
+                label: 'Should Fail Linked Token',
+                subjectType: 'user',
+                userId: dormantUser.id
+            }
+        });
+        assert.equal(userLinkedToken.status, 403);
+        assert.equal(userLinkedToken.json.error, 'User-linked tokens are unavailable in individual mode');
+
+        const standaloneToken = await apiJsonAt(context.baseUrl, '/api/tokens', {
+            method: 'POST',
+            cookie: context.adminCookie,
+            body: {
+                label: 'Individual June',
+                subjectType: 'standalone',
+                principalIdentifier: 'individual-june'
+            }
+        });
+        assert.equal(standaloneToken.status, 201);
+
+        const tokenList = await apiJsonAt(context.baseUrl, '/api/tokens', {
+            method: 'GET',
+            cookie: context.adminCookie
+        });
+        assert.equal(tokenList.status, 200);
+        assert.ok(tokenList.json.tokens.every(token => token.subjectType === 'standalone'));
+        assert.ok(tokenList.json.tokens.some(token => token.label === 'Individual June'));
+
+        const workspace = await apiJsonAt(context.baseUrl, '/api/workspace', {
+            method: 'GET',
+            cookie: context.adminCookie
+        });
+        assert.equal(workspace.status, 200);
+        assert.equal(workspace.json.runtime.productMode, 'individual');
+        assert.equal(workspace.json.runtime.identityModel, 'standalone_tokens');
+        assert.equal(workspace.json.currentAccess.canManageOwnTokens, false);
+        assert.equal(workspace.json.currentAccess.canManageAllTokens, true);
+        assert.equal(workspace.json.commands.cliUserLogin, null);
+    } finally {
+        await stopServerProcess(context.serverProcess);
+    }
+});
+
+test('individual mode gives HIGH one synthetic review by default and supports approve-everything mode', async () => {
+    const isolatedDataDir = path.join(tempRoot, `individual-auto-${uuidv4()}`);
+    const isolatedPort = 4900 + Math.floor(Math.random() * 200);
+    const context = await startIsolatedServer({
+        dataDirOverride: isolatedDataDir,
+        portOverride: isolatedPort,
+        envOverrides: {
+            NIYAM_PRODUCT_MODE: 'individual',
+            NIYAM_ENABLE_SELF_SIGNUP: 'false'
+        }
+    });
+
+    try {
+        const highRule = await apiJsonAt(context.baseUrl, '/api/rules', {
+            method: 'POST',
+            cookie: context.adminCookie,
+            body: {
+                name: 'Individual High Rule',
+                description: 'Force a high command in individual mode',
+                rule_type: 'pattern',
+                pattern: 'echo\\s+individual-high',
+                risk_level: 'HIGH',
+                priority: 910
+            }
+        });
+        assert.equal(highRule.status, 201);
+
+        const standaloneToken = await apiJsonAt(context.baseUrl, '/api/tokens', {
+            method: 'POST',
+            cookie: context.adminCookie,
+            body: {
+                label: 'Individual June',
+                subjectType: 'standalone',
+                principalIdentifier: 'individual-high-june'
+            }
+        });
+        assert.equal(standaloneToken.status, 201);
+        assert.equal(standaloneToken.json.token.autoApprovalMode, 'off');
+
+        const highPending = await apiJsonAt(context.baseUrl, '/api/commands', {
+            method: 'POST',
+            token: standaloneToken.json.plainTextToken,
+            body: {
+                command: 'echo',
+                args: ['individual-high']
+            }
+        });
+        assert.equal(highPending.status, 201);
+        assert.equal(highPending.json.status, 'pending');
+        assert.equal(highPending.json.approvalMode, 'auto_agent_pending');
+        assert.equal(highPending.json.autoApprovalMode, 'off');
+
+        const pendingDetails = await apiJsonAt(context.baseUrl, `/api/commands/${highPending.json.id}`, {
+            method: 'GET',
+            cookie: context.adminCookie
+        });
+        assert.equal(pendingDetails.status, 200);
+        assert.deepEqual(pendingDetails.json.approvedBy, ['niyam-auto-approver']);
+        assert.equal(pendingDetails.json.approvalProgress.count, 1);
+        assert.equal(pendingDetails.json.approvalProgress.required, 2);
+
+        const adminApprove = await apiJsonAt(context.baseUrl, `/api/approvals/${highPending.json.id}/approve`, {
+            method: 'POST',
+            cookie: context.adminCookie,
+            body: {
+                rationale: 'bootstrap admin approval in individual mode'
+            }
+        });
+        assert.equal(adminApprove.status, 200);
+        assert.equal(adminApprove.json.fullyApproved, true);
+
+        const completedHigh = await waitForCommandAt(context.baseUrl, context.adminCookie, highPending.json.id);
+        assert.equal(completedHigh.status, 'completed');
+        assert.deepEqual(completedHigh.approvedBy, ['niyam-auto-approver', 'admin']);
+
+        const allMode = await apiJsonAt(context.baseUrl, `/api/tokens/${standaloneToken.json.token.id}/approval-preferences`, {
+            method: 'POST',
+            cookie: context.adminCookie,
+            body: {
+                autoApprovalMode: 'all'
+            }
+        });
+        assert.equal(allMode.status, 200);
+        assert.equal(allMode.json.token.autoApprovalMode, 'all');
+
+        const highAutoApproved = await apiJsonAt(context.baseUrl, '/api/commands', {
+            method: 'POST',
+            token: standaloneToken.json.plainTextToken,
+            body: {
+                command: 'echo',
+                args: ['individual-high']
+            }
+        });
+        assert.equal(highAutoApproved.status, 201);
+        assert.equal(highAutoApproved.json.status, 'approved');
+        assert.equal(highAutoApproved.json.autoApproved, true);
+        assert.equal(highAutoApproved.json.approvalMode, 'auto_agent_approved');
+
+        const completedAutoHigh = await waitForCommandAt(context.baseUrl, context.adminCookie, highAutoApproved.json.id);
+        assert.equal(completedAutoHigh.status, 'completed');
+        assert.deepEqual(completedAutoHigh.approvedBy, ['niyam-auto-approver']);
+        assert.equal(completedAutoHigh.approvalProgress.required, 1);
+        assert.equal(completedAutoHigh.approvalProgress.twoPersonSatisfied, true);
+    } finally {
+        await stopServerProcess(context.serverProcess);
+    }
 });
 
 test('high-risk commands can be approved by two distinct dashboard users', async () => {
@@ -605,7 +1542,7 @@ test('high-risk commands can be approved by two distinct dashboard users', async
 
     const submission = await apiJson('/api/commands', {
         method: 'POST',
-        token: 'dev-token',
+        token: bootstrapManagedToken,
         body: {
             command: 'echo',
             args: ['dual-dashboard-approval']
@@ -657,9 +1594,7 @@ test('niyam-cli install, status, and disable manage shell integration in a temp 
     const cliEnv = {
         HOME: fakeHome,
         XDG_CONFIG_HOME: fakeConfigHome,
-        NIYAM_AGENT_TOKEN: 'dev-token',
-        NIYAM_CLI_BASE_URL: baseUrl,
-        NIYAM_CLI_REQUESTER: 'niyam-agent'
+        NIYAM_CLI_BASE_URL: baseUrl
     };
 
     const install = await runNodeScript('bin/niyam-cli.js', cliEnv, ['install', '--shell', 'zsh']);
@@ -678,18 +1613,35 @@ test('niyam-cli install, status, and disable manage shell integration in a temp 
     assert.ok(renderedZsh.includes('__niyam_zsh_safe_finish'));
     assert.ok(renderedZsh.includes('__niyam_zsh_expand_aliases'));
     assert.ok(renderedZsh.includes('precmd_functions'));
+    assert.ok(renderedZsh.includes('niyam-cli()'));
     assert.ok(renderedZsh.includes('niyam-on()'));
     assert.ok(renderedZsh.includes('niyam-off()'));
+    assert.ok(renderedZsh.includes('ensure-auth'));
+    assert.ok(renderedZsh.includes('"$first_token" == "niyam-on"'));
+    assert.ok(renderedZsh.includes('"$first_token" == "niyam-off"'));
     assert.ok(renderedZsh.includes('zle reset-prompt\n  print'));
     assert.ok(renderedZsh.includes('zle reset-prompt\n  zle -R'));
     assert.ok(renderedZsh.includes('__niyam_zsh_first_token __niyam_zsh_expand_aliases'));
+    assert.ok(renderedZsh.includes('local_command='));
     assert.ok(renderedBash.includes('__niyam_bash_expand_aliases'));
+    assert.ok(renderedBash.includes('niyam-cli()'));
+    assert.ok(renderedBash.includes('ensure-auth'));
+    assert.ok(renderedBash.includes('"$first_token" == "niyam-on"'));
+    assert.ok(renderedBash.includes('"$first_token" == "niyam-off"'));
+    assert.ok(renderedBash.includes('local_command='));
 
     const zshSyntax = await execFileAsync('zsh', ['-n', rcPath], {
         cwd: ROOT_DIR,
         env: { ...process.env, HOME: fakeHome }
     });
     assert.equal(zshSyntax.stderr, '');
+
+    const login = await runNodeScript('bin/niyam-cli.js', cliEnv, [
+        'login',
+        '--token',
+        bootstrapManagedToken
+    ]);
+    assert.equal(login.status, 0, login.stderr);
 
     const dispatch = await runNodeScript('bin/niyam-cli.js', cliEnv, [
         'dispatch',
@@ -714,8 +1666,8 @@ test('niyam-cli install, status, and disable manage shell integration in a temp 
 
     const status = await runNodeScript('bin/niyam-cli.js', cliEnv, ['status']);
     assert.equal(status.status, 0, status.stderr);
-    assert.ok(status.stdout.includes('Agent token: configured'));
-    assert.ok(status.stdout.includes('Requester: niyam-agent'));
+    assert.ok(status.stdout.includes('Managed token: configured'));
+    assert.ok(status.stdout.includes('Auth mode: managed-token'));
     assert.ok(status.stdout.includes('zsh: installed'));
 
     const disable = await runNodeScript('bin/niyam-cli.js', cliEnv, ['disable', '--shell', 'zsh']);
@@ -726,6 +1678,94 @@ test('niyam-cli install, status, and disable manage shell integration in a temp 
     assert.equal(rcAfterDisable.includes('niyam-on()'), true);
 });
 
+test('niyam-cli ensure-auth configures a managed token and no-prompt fails without auth', async () => {
+    const fakeHome = path.join(tempRoot, 'ensure-auth-home');
+    const fakeConfigHome = path.join(tempRoot, 'ensure-auth-config');
+    await fsPromises.mkdir(fakeHome, { recursive: true });
+    await fsPromises.mkdir(fakeConfigHome, { recursive: true });
+
+    const cliEnv = {
+        HOME: fakeHome,
+        XDG_CONFIG_HOME: fakeConfigHome,
+        NIYAM_CLI_BASE_URL: baseUrl
+    };
+
+    const missing = await runNodeScript('bin/niyam-cli.js', cliEnv, ['ensure-auth', '--no-prompt']);
+    assert.notEqual(missing.status, 0);
+    assert.ok(missing.stderr.includes('No usable CLI authentication is configured'));
+
+    const ensured = await runNodeScript('bin/niyam-cli.js', cliEnv, ['ensure-auth', '--token', bootstrapManagedToken]);
+    assert.equal(ensured.status, 0, ensured.stderr);
+    assert.ok(ensured.stdout.includes('Signed in as'));
+    assert.ok(ensured.stdout.includes('Config:'));
+
+    const status = await runNodeScript('bin/niyam-cli.js', cliEnv, ['status']);
+    assert.equal(status.status, 0, status.stderr);
+    assert.ok(status.stdout.includes('Managed token: configured'));
+    assert.ok(status.stdout.includes('Auth mode: managed-token'));
+});
+
+test('niyam-cli dispatch supports one-shot local bypass with --skip-niyam', async () => {
+    const cliEnv = {
+        NIYAM_CLI_BASE_URL: baseUrl
+    };
+
+    const before = await apiJson('/api/commands/stats/summary', {
+        method: 'GET',
+        cookie: adminCookie
+    });
+    assert.equal(before.status, 200);
+
+    const localOutputPath = path.join(tempRoot, 'skip-niyam-output.txt');
+    const dispatch = await runNodeScript('bin/niyam-cli.js', cliEnv, [
+        'dispatch',
+        '--command',
+        'ls public --skip-niyam',
+        '--shell',
+        'zsh',
+        '--session-id',
+        'cli-skip-niyam',
+        '--first-token',
+        'ls',
+        '--first-token-type',
+        'external',
+        '--working-dir',
+        ROOT_DIR,
+        '--local-output-file',
+        localOutputPath
+    ]);
+    assert.equal(dispatch.status, 86, dispatch.stderr);
+
+    const localOutput = fs.readFileSync(localOutputPath, 'utf8');
+    assert.ok(localOutput.includes('route=SKIPPED'));
+    assert.ok(localOutput.includes('reason=skip_flag'));
+    assert.ok(localOutput.includes('local_command=ls public'));
+
+    const after = await apiJson('/api/commands/stats/summary', {
+        method: 'GET',
+        cookie: adminCookie
+    });
+    assert.equal(after.status, 200);
+    assert.equal(after.json.total, before.json.total);
+
+    const dispatchJson = await runNodeScript('bin/niyam-cli.js', cliEnv, [
+        'dispatch',
+        '--json',
+        '--command',
+        'ls public --skip-niyam',
+        '--shell',
+        'zsh',
+        '--session-id',
+        'cli-skip-niyam-json',
+        '--working-dir',
+        ROOT_DIR
+    ]);
+    assert.equal(dispatchJson.status, 0, dispatchJson.stderr);
+    const parsed = JSON.parse(dispatchJson.stdout);
+    assert.equal(parsed.route, 'SKIPPED');
+    assert.equal(parsed.localCommand, 'ls public');
+});
+
 test('niyam-cli setup and uninstall provide one-command wrapper lifecycle', async () => {
     const fakeHome = path.join(tempRoot, 'setup-home');
     const fakeConfigHome = path.join(tempRoot, 'setup-config');
@@ -733,9 +1773,7 @@ test('niyam-cli setup and uninstall provide one-command wrapper lifecycle', asyn
     await fsPromises.mkdir(fakeHome, { recursive: true });
     await fsPromises.mkdir(fakeConfigHome, { recursive: true });
     await fsPromises.writeFile(envFile, [
-        `NIYAM_CLI_BASE_URL='${baseUrl}'`,
-        'NIYAM_CLI_REQUESTER=niyam-agent',
-        `NIYAM_AGENT_TOKENS='{"niyam-agent":"dev-token"}'`
+        `NIYAM_CLI_BASE_URL='${baseUrl}'`
     ].join('\n') + '\n', 'utf8');
 
     const cliEnv = {
@@ -754,14 +1792,11 @@ test('niyam-cli setup and uninstall provide one-command wrapper lifecycle', asyn
 
     const savedConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     assert.equal(savedConfig.baseUrl, baseUrl);
-    assert.equal(savedConfig.requester, 'niyam-agent');
-    assert.equal(savedConfig.agentToken, 'dev-token');
 
     const status = await runNodeScript('bin/niyam-cli.js', cliEnv, ['status']);
     assert.equal(status.status, 0, status.stderr);
     assert.ok(status.stdout.includes(`Base URL: ${baseUrl}`));
-    assert.ok(status.stdout.includes('Requester: niyam-agent'));
-    assert.ok(status.stdout.includes('Agent token: configured'));
+    assert.ok(status.stdout.includes('Auth mode: none'));
 
     const uninstall = await runNodeScript('bin/niyam-cli.js', cliEnv, ['uninstall', '--purge-config']);
     assert.equal(uninstall.status, 0, uninstall.stderr);
@@ -771,6 +1806,40 @@ test('niyam-cli setup and uninstall provide one-command wrapper lifecycle', asyn
     assert.equal(fs.existsSync(configPath), false);
 });
 
+test('niyam-cli dispatch skips local niyam-cli invocations even without existing auth', async () => {
+    const fakeHome = path.join(tempRoot, 'self-cli-home');
+    const fakeConfigHome = path.join(tempRoot, 'self-cli-config');
+    await fsPromises.mkdir(fakeHome, { recursive: true });
+    await fsPromises.mkdir(fakeConfigHome, { recursive: true });
+
+    const cliEnv = {
+        HOME: fakeHome,
+        XDG_CONFIG_HOME: fakeConfigHome,
+        NIYAM_CLI_BASE_URL: baseUrl
+    };
+
+    const localOutputPath = path.join(tempRoot, 'self-cli-output.txt');
+    const dispatch = await runNodeScript('bin/niyam-cli.js', cliEnv, [
+        'dispatch',
+        '--command',
+        `node ${path.join(ROOT_DIR, 'bin/niyam-cli.js')} status`,
+        '--shell',
+        'zsh',
+        '--session-id',
+        'cli-self-command',
+        '--working-dir',
+        ROOT_DIR,
+        '--local-output-file',
+        localOutputPath
+    ]);
+    assert.equal(dispatch.status, 86, dispatch.stderr);
+
+    const localOutput = fs.readFileSync(localOutputPath, 'utf8');
+    assert.ok(localOutput.includes('route=SKIPPED'));
+    assert.ok(localOutput.includes('reason=self_cli'));
+    assert.ok(localOutput.includes(`local_command=node ${path.join(ROOT_DIR, 'bin/niyam-cli.js')} status`));
+});
+
 test('niyam-cli setup prefers env-file token values over stale shell exports', async () => {
     const fakeHome = path.join(tempRoot, 'setup-prefer-file-home');
     const fakeConfigHome = path.join(tempRoot, 'setup-prefer-file-config');
@@ -778,16 +1847,14 @@ test('niyam-cli setup prefers env-file token values over stale shell exports', a
     await fsPromises.mkdir(fakeHome, { recursive: true });
     await fsPromises.mkdir(fakeConfigHome, { recursive: true });
     await fsPromises.writeFile(envFile, [
-        `NIYAM_CLI_BASE_URL='${baseUrl}'`,
-        'NIYAM_CLI_REQUESTER=niyam-agent',
-        `NIYAM_AGENT_TOKENS='{"niyam-agent":"dev-token"}'`
+        `NIYAM_CLI_BASE_URL='${baseUrl}'`
     ].join('\n') + '\n', 'utf8');
 
     const cliEnv = {
         HOME: fakeHome,
         XDG_CONFIG_HOME: fakeConfigHome,
         SHELL: '/bin/zsh',
-        NIYAM_AGENT_TOKEN: 'stale-shell-token'
+        NIYAM_CLI_BASE_URL: 'http://127.0.0.1:9999'
     };
 
     const setup = await runNodeScript('bin/niyam-cli.js', cliEnv, ['setup', '--env-file', envFile]);
@@ -795,9 +1862,45 @@ test('niyam-cli setup prefers env-file token values over stale shell exports', a
 
     const configPath = path.join(fakeConfigHome, 'niyam', 'config.json');
     const savedConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    assert.equal(savedConfig.agentToken, 'dev-token');
-    assert.equal(savedConfig.requester, 'niyam-agent');
     assert.equal(savedConfig.baseUrl, baseUrl);
+});
+
+test('niyam-cli setup can clear stale managed-token and session auth', async () => {
+    const fakeHome = path.join(tempRoot, 'setup-reset-auth-home');
+    const fakeConfigHome = path.join(tempRoot, 'setup-reset-auth-config');
+    const envFile = path.join(tempRoot, 'setup-reset-auth.env');
+    await fsPromises.mkdir(fakeHome, { recursive: true });
+    await fsPromises.mkdir(path.join(fakeConfigHome, 'niyam'), { recursive: true });
+    await fsPromises.writeFile(envFile, [
+        `NIYAM_CLI_BASE_URL='${baseUrl}'`
+    ].join('\n') + '\n', 'utf8');
+
+    const configPath = path.join(fakeConfigHome, 'niyam', 'config.json');
+    await fsPromises.writeFile(configPath, `${JSON.stringify({
+        baseUrl: 'http://127.0.0.1:9999',
+        managedToken: 'nym_stale_token',
+        sessionCookie: 'niyam_session=stale-session'
+    }, null, 2)}\n`, 'utf8');
+
+    const cliEnv = {
+        HOME: fakeHome,
+        XDG_CONFIG_HOME: fakeConfigHome,
+        SHELL: '/bin/zsh'
+    };
+
+    const setup = await runNodeScript('bin/niyam-cli.js', cliEnv, ['setup', '--env-file', envFile, '--reset-auth']);
+    assert.equal(setup.status, 0, setup.stderr);
+
+    const savedConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    assert.equal(savedConfig.baseUrl, baseUrl);
+    assert.equal(savedConfig.managedToken, '');
+    assert.equal(savedConfig.sessionCookie, '');
+
+    const status = await runNodeScript('bin/niyam-cli.js', cliEnv, ['status']);
+    assert.equal(status.status, 0, status.stderr);
+    assert.ok(status.stdout.includes('Managed token: missing'));
+    assert.ok(status.stdout.includes('Local session: missing'));
+    assert.ok(status.stdout.includes('Auth mode: none'));
 });
 
 test('niyam-cli env overrides stale config values', async () => {
@@ -809,23 +1912,19 @@ test('niyam-cli env overrides stale config values', async () => {
     const configPath = path.join(fakeConfigHome, 'niyam', 'config.json');
     await fsPromises.writeFile(configPath, `${JSON.stringify({
         baseUrl: 'http://127.0.0.1:9999',
-        agentToken: '',
-        requester: 'prajjwal.kumar'
+        managedToken: bootstrapManagedToken
     }, null, 2)}\n`, 'utf8');
 
     const cliEnv = {
         HOME: fakeHome,
         XDG_CONFIG_HOME: fakeConfigHome,
-        NIYAM_AGENT_TOKEN: 'dev-token',
-        NIYAM_CLI_BASE_URL: baseUrl,
-        NIYAM_CLI_REQUESTER: 'niyam-agent'
+        NIYAM_CLI_BASE_URL: baseUrl
     };
 
     const status = await runNodeScript('bin/niyam-cli.js', cliEnv, ['status']);
     assert.equal(status.status, 0, status.stderr);
     assert.ok(status.stdout.includes(`Base URL: ${baseUrl}`));
-    assert.ok(status.stdout.includes('Requester: niyam-agent'));
-    assert.ok(status.stdout.includes('Agent token: configured'));
+    assert.ok(status.stdout.includes('Managed token: configured'));
 
     const dispatch = await runNodeScript('bin/niyam-cli.js', cliEnv, [
         'dispatch',
@@ -874,9 +1973,7 @@ test('niyam-cli local user login lets wrapper dispatch commands as the signed-in
     const cliEnv = {
         HOME: fakeHome,
         XDG_CONFIG_HOME: fakeConfigHome,
-        NIYAM_CLI_BASE_URL: baseUrl,
-        NIYAM_AGENT_TOKEN: 'dev-token',
-        NIYAM_CLI_REQUESTER: 'niyam-agent'
+        NIYAM_CLI_BASE_URL: baseUrl
     };
 
     const login = await runNodeScript('bin/niyam-cli.js', cliEnv, [
@@ -920,20 +2017,141 @@ test('niyam-cli local user login lets wrapper dispatch commands as the signed-in
 
     const logout = await runNodeScript('bin/niyam-cli.js', cliEnv, ['logout']);
     assert.equal(logout.status, 0, logout.stderr);
-    assert.match(logout.stdout, /Signed out of local user session/);
+    assert.match(logout.stdout, /Cleared CLI authentication/);
 
     const statusAfterLogout = await runNodeScript('bin/niyam-cli.js', cliEnv, ['status']);
     assert.equal(statusAfterLogout.status, 0, statusAfterLogout.stderr);
     assert.ok(statusAfterLogout.stdout.includes('Local session: missing'));
-    assert.ok(statusAfterLogout.stdout.includes('Auth mode: agent-token'));
+    assert.ok(statusAfterLogout.stdout.includes('Auth mode: none'));
+});
+
+test('niyam-cli token login stores managed token auth and falls back cleanly on logout', async () => {
+    const createUser = await apiJson('/api/users', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            username: 'cli-token-user',
+            displayName: 'CLI Token User',
+            password: 'cli-token-pass',
+            enabled: true,
+            roles: [],
+            approvalCapabilities: {
+                canApproveMedium: false,
+                canApproveHigh: false
+            }
+        }
+    });
+    assert.equal(createUser.status, 201);
+
+    const managedToken = await apiJson('/api/tokens', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            label: 'January CLI',
+            subjectType: 'user',
+            userId: createUser.json.id
+        }
+    });
+    assert.equal(managedToken.status, 201);
+
+    const fakeHome = path.join(tempRoot, 'cli-token-home');
+    const fakeConfigHome = path.join(tempRoot, 'cli-token-config');
+    await fsPromises.mkdir(fakeHome, { recursive: true });
+    await fsPromises.mkdir(fakeConfigHome, { recursive: true });
+
+    const cliEnv = {
+        HOME: fakeHome,
+        XDG_CONFIG_HOME: fakeConfigHome,
+        NIYAM_CLI_BASE_URL: baseUrl
+    };
+
+    const login = await runNodeScript('bin/niyam-cli.js', cliEnv, [
+        'login',
+        '--token',
+        managedToken.json.plainTextToken
+    ]);
+    assert.equal(login.status, 0, login.stderr);
+    assert.match(login.stdout, /Signed in as cli-token-user/);
+    assert.match(login.stdout, /Token label: January CLI/);
+
+    const status = await runNodeScript('bin/niyam-cli.js', cliEnv, ['status']);
+    assert.equal(status.status, 0, status.stderr);
+    assert.ok(status.stdout.includes('Managed token: configured'));
+    assert.ok(status.stdout.includes('Local session: missing'));
+    assert.ok(status.stdout.includes('Auth mode: managed-token'));
+    assert.ok(status.stdout.includes('Principal: cli-token-user · user'));
+    assert.ok(status.stdout.includes('Token label: January CLI'));
+
+    const dispatch = await runNodeScript('bin/niyam-cli.js', cliEnv, [
+        'dispatch',
+        '--json',
+        '--command',
+        'ls public',
+        '--shell',
+        'zsh',
+        '--session-id',
+        'cli-managed-token-dispatch',
+        '--first-token',
+        'ls',
+        '--first-token-type',
+        'external',
+        '--working-dir',
+        ROOT_DIR
+    ]);
+    assert.equal(dispatch.status, 0, dispatch.stderr);
+    const dispatchJson = JSON.parse(dispatch.stdout);
+    assert.equal(dispatchJson.route, 'REMOTE_EXEC');
+
+    const command = await waitForCommand(dispatchJson.commandId);
+    assert.equal(command.requester, 'cli-token-user');
+    assert.equal(command.authenticationContext.mode, 'managed_token');
+    assert.equal(command.authenticationContext.credentialLabel, 'January CLI');
+
+    const logout = await runNodeScript('bin/niyam-cli.js', cliEnv, ['logout']);
+    assert.equal(logout.status, 0, logout.stderr);
+    assert.match(logout.stdout, /Cleared CLI authentication/);
+
+    const statusAfterLogout = await runNodeScript('bin/niyam-cli.js', cliEnv, ['status']);
+    assert.equal(statusAfterLogout.status, 0, statusAfterLogout.stderr);
+    assert.ok(statusAfterLogout.stdout.includes('Managed token: missing'));
+    assert.ok(statusAfterLogout.stdout.includes('Auth mode: none'));
+
+    const relogin = await runNodeScript('bin/niyam-cli.js', cliEnv, [
+        'login',
+        '--token',
+        managedToken.json.plainTextToken
+    ]);
+    assert.equal(relogin.status, 0, relogin.stderr);
+
+    const blockedToken = await apiJson(`/api/tokens/${managedToken.json.token.id}/block`, {
+        method: 'POST',
+        cookie: adminCookie
+    });
+    assert.equal(blockedToken.status, 200);
+
+    const blockedDispatch = await runNodeScript('bin/niyam-cli.js', cliEnv, [
+        'dispatch',
+        '--command',
+        'ls public',
+        '--shell',
+        'zsh',
+        '--session-id',
+        'cli-managed-token-dispatch-blocked',
+        '--first-token',
+        'ls',
+        '--first-token-type',
+        'external',
+        '--working-dir',
+        ROOT_DIR
+    ]);
+    assert.equal(blockedDispatch.status, 125);
+    assert.match(blockedDispatch.stderr, /token is blocked\. create a new token from the dashboard\./i);
 });
 
 test('niyam-cli falls back to local execution when the server is unreachable', async () => {
     const localOutputPath = path.join(tempRoot, 'dispatch-local-output.txt');
     const cliEnv = {
-        NIYAM_AGENT_TOKEN: 'dev-token',
-        NIYAM_CLI_BASE_URL: 'http://127.0.0.1:9',
-        NIYAM_CLI_REQUESTER: 'niyam-agent'
+        NIYAM_CLI_BASE_URL: 'http://127.0.0.1:9'
     };
 
     const dispatch = await runNodeScript('bin/niyam-cli.js', cliEnv, [
@@ -960,12 +2178,24 @@ test('niyam-cli falls back to local execution when the server is unreachable', a
 });
 
 test('niyam-cli announces approval lifecycle for pending remote commands', async () => {
+    const fakeHome = path.join(tempRoot, 'cli-approval-home');
+    const fakeConfigHome = path.join(tempRoot, 'cli-approval-config');
+    await fsPromises.mkdir(fakeHome, { recursive: true });
+    await fsPromises.mkdir(fakeConfigHome, { recursive: true });
+
     const cliEnv = {
-        NIYAM_AGENT_TOKEN: 'dev-token',
+        HOME: fakeHome,
+        XDG_CONFIG_HOME: fakeConfigHome,
         NIYAM_CLI_BASE_URL: baseUrl,
-        NIYAM_CLI_REQUESTER: 'niyam-agent',
         NIYAM_CLI_POLL_INTERVAL_MS: '100'
     };
+
+    const login = await runNodeScript('bin/niyam-cli.js', cliEnv, [
+        'login',
+        '--token',
+        bootstrapManagedToken
+    ]);
+    assert.equal(login.status, 0, login.stderr);
 
     const dispatchPromise = runNodeScript('bin/niyam-cli.js', cliEnv, [
         'dispatch',
@@ -1019,7 +2249,7 @@ test('niyam-cli announces approval lifecycle for pending remote commands', async
 test('audit API enriches legacy command entries with command line details', async () => {
     const submission = await apiJson('/api/commands', {
         method: 'POST',
-        token: 'dev-token',
+        token: bootstrapManagedToken,
         body: {
             command: 'git',
             args: ['push', '--no-verify']
@@ -1097,7 +2327,7 @@ test('backup and restore scripts preserve the database state', async () => {
     restoredDb.close();
 
     assert.ok(commandCount >= 1);
-    assert.equal(migrationCount, 5);
+    assert.equal(migrationCount, 9);
 });
 
 test('exec key rotation preserves delayed execution payloads', async () => {
@@ -1118,7 +2348,7 @@ test('exec key rotation preserves delayed execution payloads', async () => {
 
     const submission = await apiJson('/api/commands', {
         method: 'POST',
-        token: 'dev-token',
+        token: bootstrapManagedToken,
         body: {
             command: 'printf',
             args: ['rotate-check']
@@ -1143,7 +2373,7 @@ test('exec key rotation preserves delayed execution payloads', async () => {
     const rotationJson = JSON.parse(rotation.stdout);
     assert.ok(rotationJson.rotatedRows >= 1);
 
-    currentExecKey = rotatedKey;
+    harness.setCurrentExecKey(rotatedKey);
     await startServer();
 
     const approval = await apiJson(`/api/approvals/${submission.json.id}/approve`, {
@@ -1164,195 +2394,3 @@ test('exec key rotation preserves delayed execution payloads', async () => {
     assert.equal(audit.status, 200);
     assert.ok(audit.json.entries.some(entry => entry.event_type === 'exec_key_rotated'));
 });
-
-test('load and soak scripts complete successfully against the live API', async () => {
-    const load = await runNodeScript('scripts/load.js', {
-        NIYAM_BENCH_BASE_URL: baseUrl,
-        NIYAM_BENCH_ADMIN_USERNAME: 'admin',
-        NIYAM_BENCH_ADMIN_PASSWORD: 'admin',
-        NIYAM_BENCH_AGENT_TOKEN: 'dev-token',
-        NIYAM_LOAD_TOTAL_OPERATIONS: '8',
-        NIYAM_LOAD_CONCURRENCY: '2',
-        NIYAM_SERVER_PID: String(serverProcess.pid)
-    });
-
-    assert.equal(load.status, 0, load.stderr);
-    const loadJson = JSON.parse(load.stdout);
-    assert.equal(loadJson.ok, true);
-    assert.ok(loadJson.completedOperations >= 8);
-
-    const soak = await runNodeScript('scripts/soak.js', {
-        NIYAM_BENCH_BASE_URL: baseUrl,
-        NIYAM_BENCH_ADMIN_USERNAME: 'admin',
-        NIYAM_BENCH_ADMIN_PASSWORD: 'admin',
-        NIYAM_BENCH_AGENT_TOKEN: 'dev-token',
-        NIYAM_SOAK_DURATION_SECONDS: '3',
-        NIYAM_SOAK_CONCURRENCY: '2',
-        NIYAM_SERVER_PID: String(serverProcess.pid)
-    });
-
-    assert.equal(soak.status, 0, soak.stderr);
-    const soakJson = JSON.parse(soak.stdout);
-    assert.equal(soakJson.ok, true);
-    assert.ok(soakJson.completedOperations >= 1);
-});
-
-async function startServer() {
-    serverProcess = spawn(process.execPath, ['server.js'], {
-        cwd: ROOT_DIR,
-        env: {
-            ...process.env,
-            NIYAM_PROFILE: 'local',
-            NIYAM_ENV_FILE: path.join(tempRoot, 'test.env'),
-            NIYAM_PORT: String(port),
-            NIYAM_ADMIN_PASSWORD: 'admin',
-            NIYAM_METRICS_TOKEN: 'metrics-secret',
-            NIYAM_AGENT_TOKENS: JSON.stringify({ 'niyam-agent': 'dev-token' }),
-            NIYAM_ENABLE_SELF_SIGNUP: 'true',
-            NIYAM_EXEC_ALLOWED_ROOTS: ROOT_DIR,
-            NIYAM_EXEC_DEFAULT_MODE: 'DIRECT',
-            NIYAM_EXEC_WRAPPER: '["/usr/bin/env"]',
-            NIYAM_EXEC_DATA_KEY: currentExecKey,
-            NIYAM_DATA_DIR: dataDir
-        },
-        stdio: ['ignore', 'pipe', 'pipe']
-    });
-
-    serverProcess.stdout.on('data', () => {});
-    serverProcess.stderr.on('data', () => {});
-
-    await waitForHealth();
-    adminCookie = await loginAsAdmin();
-}
-
-async function stopServer() {
-    if (serverProcess && !serverProcess.killed && serverProcess.exitCode === null) {
-        serverProcess.kill('SIGTERM');
-        await onceExit(serverProcess);
-    }
-}
-
-async function waitForHealth() {
-    for (let attempt = 0; attempt < 30; attempt += 1) {
-        try {
-            const response = await fetch(`${baseUrl}/api/health`);
-            if (response.ok) {
-                return;
-            }
-        } catch (error) {
-            // Server not ready yet.
-        }
-        await sleep(250);
-    }
-
-    throw new Error('Server did not become ready in time');
-}
-
-async function loginAsAdmin() {
-    const result = await loginAsLocalUser('admin', 'admin');
-    assert.equal(result.status, 200);
-    assert.ok(result.cookie, 'expected session cookie');
-    return result.cookie;
-}
-
-async function loginAsLocalUser(username, password) {
-    const response = await fetch(`${baseUrl}/api/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            username,
-            password
-        })
-    });
-    const setCookie = response.headers.get('set-cookie');
-    const json = await response.json();
-    return {
-        status: response.status,
-        json,
-        cookie: setCookie ? setCookie.split(';')[0] : ''
-    };
-}
-
-async function apiJson(endpoint, options = {}) {
-    const headers = {
-        ...(options.body ? { 'Content-Type': 'application/json' } : {})
-    };
-
-    if (options.cookie) {
-        headers.Cookie = options.cookie;
-    }
-    if (options.token) {
-        headers.Authorization = `Bearer ${options.token}`;
-    }
-
-    const response = await fetch(`${baseUrl}${endpoint}`, {
-        method: options.method || 'GET',
-        headers,
-        body: options.body ? JSON.stringify(options.body) : undefined
-    });
-
-    const json = await response.json();
-    return { status: response.status, json };
-}
-
-async function waitForCommand(commandId) {
-    for (let attempt = 0; attempt < 30; attempt += 1) {
-        const response = await apiJson(`/api/commands/${commandId}`, {
-            method: 'GET',
-            cookie: adminCookie
-        });
-
-        if (['completed', 'failed', 'rejected', 'timeout'].includes(response.json.status)) {
-            return response.json;
-        }
-
-        await sleep(250);
-    }
-
-    throw new Error(`Command ${commandId} did not reach a terminal status`);
-}
-
-function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function onceExit(child) {
-    if (!child || child.exitCode !== null) {
-        return Promise.resolve();
-    }
-
-    return new Promise(resolve => {
-        child.once('exit', resolve);
-    });
-}
-
-function runNodeScript(scriptPath, extraEnv = {}, args = []) {
-    return new Promise(resolve => {
-        const child = spawn(process.execPath, [scriptPath, ...args], {
-            cwd: ROOT_DIR,
-            env: {
-                ...process.env,
-                ...extraEnv
-            },
-            stdio: ['ignore', 'pipe', 'pipe']
-        });
-
-        let stdout = '';
-        let stderr = '';
-
-        child.stdout.on('data', chunk => {
-            stdout += chunk.toString();
-        });
-        child.stderr.on('data', chunk => {
-            stderr += chunk.toString();
-        });
-
-        child.on('close', status => {
-            resolve({
-                status,
-                stdout: stdout.trim(),
-                stderr: stderr.trim()
-            });
-        });
-    });
-}

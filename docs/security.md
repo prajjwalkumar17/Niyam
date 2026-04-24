@@ -26,7 +26,7 @@ Niyam is a command-governance layer, not a full host security boundary.
 Key protections currently in place:
 
 - authenticated dashboard sessions
-- bearer-token auth for agents
+- managed bearer tokens for CLI and API access
 - approval enforcement for risky commands
 - rule-driven `DIRECT` vs `WRAPPER` execution
 - working-directory confinement
@@ -39,6 +39,10 @@ Key protections currently in place:
 - Commands still execute on the host unless you deliberately route them through a real sandbox or container.
 - Historical rows created before redaction rollout are not automatically backfilled.
 - Losing or changing `NIYAM_EXEC_DATA_KEY` without a migration plan can strand pending encrypted execution payloads.
+- Managed tokens are shown in plaintext only once. If lost, create a new token instead of trying to recover the old value.
+- Blocking a managed token is irreversible in the current product shape.
+- User-linked managed tokens do not satisfy admin-session-only routes.
+- Auto-approval is auditable, but it still executes commands on the host. Treat it as an operator convenience, not as a sandbox.
 
 ## Operator Recommendations
 
@@ -47,7 +51,9 @@ Key protections currently in place:
 - protect `NIYAM_EXEC_DATA_KEY` like any other production secret
 - run the smoke and test suite after deployment changes
 - review audit exports regularly
-- rotate agent tokens deliberately and remove stale tokens
+- have users create separate tokens per CLI or workflow so audit can distinguish `alice via Cursor CLI` from `alice via Claude Code`
+- enable auto-approval only for identities that are supposed to run unattended for periods of time
+- remember that `HIGH` risk still needs one human approval even when auto-approval is enabled
 
 ## Scope For Public Use
 

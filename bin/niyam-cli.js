@@ -19,6 +19,8 @@ const {
     isBlankCommand,
     isCommentOnlyCommand,
     isLikelyInteractiveCommand,
+    isNiyamCliInvocation,
+    stripStandaloneFlag,
     tokenizeCommand
 } = require('../lib/command-line');
 const { version } = require('../package.json');
@@ -55,6 +57,8 @@ async function main(argv) {
             return handleLogout();
         case 'status':
             return handleStatus();
+        case 'ensure-auth':
+            return handleEnsureAuth(parsed);
         case 'uninstall':
             return handleUninstall(parsed);
         case 'disable':
@@ -87,18 +91,14 @@ async function handleSetup(parsed) {
 
     const overrides = {
         baseUrl: parsed.options['base-url'] || fileConfig.baseUrl,
-        requester: parsed.options.requester || fileConfig.requester,
-        agentToken: parsed.options['agent-token'] || fileConfig.agentToken
+        ...(parsed.options['reset-auth'] ? {
+            managedToken: '',
+            sessionCookie: ''
+        } : {})
     };
 
     if (!overrides.baseUrl) {
         throw new Error('Setup could not determine the base URL. Pass --base-url or add NIYAM_CLI_BASE_URL / NIYAM_PORT to the env file.');
-    }
-    if (!overrides.requester) {
-        throw new Error('Setup could not determine the requester. Pass --requester or add NIYAM_CLI_REQUESTER / NIYAM_AGENT_TOKENS to the env file.');
-    }
-    if (!overrides.agentToken) {
-        throw new Error('Setup could not determine the agent token. Pass --agent-token or add NIYAM_AGENT_TOKENS to the env file.');
     }
 
     const { configPath } = ensureCliConfig(overrides, { applyEnvOverrides: false });
@@ -131,15 +131,47 @@ async function handleDispatch(parsed) {
         throw new Error('Dispatch requires --command');
     }
 
-    const firstToken = parsed.options['first-token'] || (tokenizeCommand(rawCommand)[0] || '');
+    const bypass = stripStandaloneFlag(rawCommand, '--skip-niyam');
+    const effectiveCommand = bypass.found ? bypass.command : rawCommand;
+    const firstToken = bypass.found
+        ? (tokenizeCommand(effectiveCommand)[0] || '')
+        : (parsed.options['first-token'] || (tokenizeCommand(rawCommand)[0] || ''));
     const workingDir = parsed.options['working-dir'] || process.cwd();
-    if (shouldSkipCommand(rawCommand, firstToken, config.skipCommands)) {
+    if (bypass.found) {
+        if (parsed.options.json) {
+            process.stdout.write(`${JSON.stringify({
+                route: 'SKIPPED',
+                reason: 'Command bypassed Niyam with --skip-niyam',
+                localCommand: effectiveCommand
+            }, null, 2)}\n`);
+            return 0;
+        }
+
+        writeLocalOutput(parsed.options['local-output-file'], buildSkippedLocalOutput(effectiveCommand, 'skip_flag'));
+        return SKIPPED_EXIT_CODE;
+    }
+
+    if (shouldSkipCommand(effectiveCommand, firstToken, config.skipCommands)) {
         if (parsed.options.json) {
             process.stdout.write(`${JSON.stringify({ route: 'SKIPPED', reason: 'Command was skipped locally' }, null, 2)}\n`);
             return 0;
         }
 
         writeLocalOutput(parsed.options['local-output-file'], 'route=SKIPPED\n');
+        return SKIPPED_EXIT_CODE;
+    }
+
+    if (isNiyamCliInvocation(effectiveCommand)) {
+        if (parsed.options.json) {
+            process.stdout.write(`${JSON.stringify({
+                route: 'SKIPPED',
+                reason: 'Niyam CLI commands always run locally',
+                localCommand: effectiveCommand
+            }, null, 2)}\n`);
+            return 0;
+        }
+
+        writeLocalOutput(parsed.options['local-output-file'], buildSkippedLocalOutput(effectiveCommand, 'self_cli'));
         return SKIPPED_EXIT_CODE;
     }
 
@@ -153,14 +185,14 @@ async function handleDispatch(parsed) {
     let dispatch;
     try {
         dispatch = await client.createCliDispatch({
-            rawCommand,
+            rawCommand: effectiveCommand,
             workingDir,
             shell: parsed.options.shell || 'unknown',
             sessionId: parsed.options['session-id'] || null,
             firstToken,
             firstTokenType: parsed.options['first-token-type'] || 'unknown',
-            hasShellSyntax: hasShellSyntax(rawCommand),
-            interactiveHint: isLikelyInteractiveCommand(rawCommand, config.interactivePatterns),
+            hasShellSyntax: hasShellSyntax(effectiveCommand),
+            interactiveHint: isLikelyInteractiveCommand(effectiveCommand, config.interactivePatterns),
             metadata
         });
     } catch (error) {
@@ -229,6 +261,17 @@ async function handleReportLocalResult(parsed) {
 
 async function handleLogin(parsed) {
     const { configPath, config } = loadCliConfig();
+    const explicitToken = typeof parsed.options.token === 'string' ? parsed.options.token.trim() : '';
+    const quiet = Boolean(parsed.options.quiet);
+
+    if (explicitToken) {
+        await signInWithManagedToken(config, explicitToken, { quiet });
+        if (!quiet) {
+            console.log(`Config: ${configPath}`);
+        }
+        return 0;
+    }
+
     const username = parsed.options.username || await promptForInput('Username');
     const password = parsed.options.password || await promptForSecret('Password');
 
@@ -245,37 +288,45 @@ async function handleLogin(parsed) {
     });
     const result = await client.loginLocalUser(username, password);
     ensureCliConfig({
-        sessionCookie: result.sessionCookie
+        sessionCookie: result.sessionCookie,
+        managedToken: ''
     }, { applyEnvOverrides: false });
 
     console.log(`Signed in as ${result.principal.identifier}`);
+    if (result.approvalPreferences) {
+        console.log(`Auto approval: ${result.approvalPreferences.autoApprovalEnabled ? 'enabled' : 'disabled'}`);
+        console.log(`Auto approval scope: ${result.approvalPreferences.scope || 'none'}`);
+    }
     console.log(`Config: ${configPath}`);
     return 0;
 }
 
 async function handleLogout() {
     const { configPath, config } = loadCliConfig();
-    if (!config.sessionCookie) {
-        console.log('No local user session is configured.');
+    if (!config.sessionCookie && !config.managedToken) {
+        console.log('No CLI authentication is configured.');
         return 0;
     }
 
-    try {
-        const client = new AgentClient({
-            baseUrl: config.baseUrl,
-            sessionCookie: config.sessionCookie,
-            timeout: config.connectTimeoutMs
-        });
-        await client.logoutLocalUser();
-    } catch (error) {
-        // Clear the stale local session even if the server is unavailable.
+    if (config.sessionCookie) {
+        try {
+            const client = new AgentClient({
+                baseUrl: config.baseUrl,
+                sessionCookie: config.sessionCookie,
+                timeout: config.connectTimeoutMs
+            });
+            await client.logoutLocalUser();
+        } catch (error) {
+            // Clear the stale local session even if the server is unavailable.
+        }
     }
 
     ensureCliConfig({
-        sessionCookie: ''
+        sessionCookie: '',
+        managedToken: ''
     }, { applyEnvOverrides: false });
 
-    console.log('Signed out of local user session.');
+    console.log('Cleared CLI authentication.');
     console.log(`Config: ${configPath}`);
     return 0;
 }
@@ -285,8 +336,7 @@ async function handleStatus() {
     const shells = ['zsh', 'bash'];
     console.log(`Config: ${configPath}`);
     console.log(`Base URL: ${config.baseUrl}`);
-    console.log(`Requester: ${config.requester || 'missing'}`);
-    console.log(`Agent token: ${config.agentToken ? 'configured' : 'missing'}`);
+    console.log(`Managed token: ${config.managedToken ? 'configured' : 'missing'}`);
     console.log(`Local session: ${config.sessionCookie ? 'configured' : 'missing'}`);
     console.log(`Auth mode: ${describeAuthMode(config)}`);
 
@@ -314,10 +364,61 @@ async function handleStatus() {
         const client = buildClient(config);
         const me = await client.getCurrentPrincipal();
         console.log(`Principal: ${me.principal.identifier} · ${me.principal.type}`);
+        if (me.authentication && me.authentication.credentialLabel) {
+            console.log(`Token label: ${me.authentication.credentialLabel}`);
+        }
+        if (me.approvalPreferences) {
+            console.log(`Auto approval: ${me.approvalPreferences.autoApprovalEnabled ? 'enabled' : 'disabled'}`);
+            console.log(`Auto approval scope: ${me.approvalPreferences.scope || 'none'}`);
+        }
     } catch (error) {
         console.log(`Principal: unavailable (${error.message})`);
     }
 
+    return 0;
+}
+
+async function handleEnsureAuth(parsed) {
+    const { configPath, config } = loadCliConfig();
+    const explicitToken = typeof parsed.options.token === 'string' ? parsed.options.token.trim() : '';
+    const noPrompt = Boolean(parsed.options['no-prompt']);
+
+    if (explicitToken) {
+        await signInWithManagedToken(config, explicitToken);
+        console.log(`Config: ${configPath}`);
+        return 0;
+    }
+
+    const existingAuth = await validateExistingCliAuth(config);
+    if (existingAuth.ok) {
+        console.log(`CLI auth ready: ${existingAuth.principal}`);
+        console.log(`Config: ${configPath}`);
+        return 0;
+    }
+
+    if (existingAuth.reason) {
+        console.log(existingAuth.reason);
+    }
+
+    if (config.sessionCookie || config.managedToken) {
+        ensureCliConfig({
+            sessionCookie: '',
+            managedToken: ''
+        }, { applyEnvOverrides: false });
+    }
+
+    if (noPrompt || !process.stdin.isTTY || !process.stdout.isTTY) {
+        throw new Error('No usable CLI authentication is configured. Create a token from the dashboard, then run "niyam-cli login --token <token>" and try again.');
+    }
+
+    console.log('Create a managed token from the dashboard if you do not already have one.');
+    const token = (await promptForSecret('Paste managed token')).trim();
+    if (!token) {
+        throw new Error('Niyam wrapper stays off until a managed token is configured.');
+    }
+
+    await signInWithManagedToken(config, token);
+    console.log(`Config: ${configPath}`);
     return 0;
 }
 
@@ -405,31 +506,75 @@ function buildClient(config) {
         });
     }
 
-    if (!config.agentToken) {
-        throw new Error('Agent token is missing from the CLI config');
-    }
-    if (!config.requester) {
-        throw new Error('Requester is missing from the CLI config');
+    if (config.managedToken) {
+        return new AgentClient({
+            baseUrl: config.baseUrl,
+            apiToken: config.managedToken,
+            timeout: config.connectTimeoutMs
+        });
     }
 
     return new AgentClient({
         baseUrl: config.baseUrl,
-        agentName: config.requester,
-        apiToken: config.agentToken,
         timeout: config.connectTimeoutMs
     });
 }
 
+async function validateExistingCliAuth(config) {
+    if (!hasAnyCliAuth(config)) {
+        return { ok: false, reason: '' };
+    }
+
+    try {
+        const me = await buildClient(config).getCurrentPrincipal();
+        return {
+            ok: true,
+            principal: me.principal.identifier
+        };
+    } catch (error) {
+        return {
+            ok: false,
+            reason: error.message
+        };
+    }
+}
+
+async function signInWithManagedToken(config, token, options = {}) {
+    const client = new AgentClient({
+        baseUrl: config.baseUrl,
+        apiToken: token,
+        timeout: config.connectTimeoutMs
+    });
+    const result = await client.getCurrentPrincipal();
+    if (!result.authentication || result.authentication.mode !== 'managed_token') {
+        throw new Error('Login --token requires a dashboard-managed token');
+    }
+
+    ensureCliConfig({
+        managedToken: token,
+        sessionCookie: ''
+    }, { applyEnvOverrides: false });
+
+    console.log(`Signed in as ${result.principal.identifier}`);
+    if (!options.quiet && result.authentication.credentialLabel) {
+        console.log(`Token label: ${result.authentication.credentialLabel}`);
+    }
+    if (!options.quiet && result.approvalPreferences) {
+        console.log(`Auto approval: ${result.approvalPreferences.autoApprovalEnabled ? 'enabled' : 'disabled'}`);
+        console.log(`Auto approval scope: ${result.approvalPreferences.scope || 'none'}`);
+    }
+}
+
 function hasAnyCliAuth(config) {
-    return Boolean(config.sessionCookie || (config.agentToken && config.requester));
+    return Boolean(config.sessionCookie || config.managedToken);
 }
 
 function describeAuthMode(config) {
     if (config.sessionCookie) {
         return 'local-user-session';
     }
-    if (config.agentToken && config.requester) {
-        return 'agent-token';
+    if (config.managedToken) {
+        return 'managed-token';
     }
     return 'none';
 }
@@ -555,6 +700,14 @@ function writeLocalOutput(filePath, content) {
     fs.writeFileSync(path.resolve(filePath), content, 'utf8');
 }
 
+function buildSkippedLocalOutput(localCommand, reason = 'skipped') {
+    const lines = [`route=SKIPPED`, `reason=${reason}`];
+    if (localCommand) {
+        lines.push(`local_command=${localCommand}`);
+    }
+    return `${lines.join('\n')}\n`;
+}
+
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -583,17 +736,12 @@ function resolveEnvFile(input) {
 
 function loadSetupConfigFromEnvFile(envFile) {
     const values = parseEnvFile(fs.readFileSync(envFile, 'utf8'));
-    const tokenMap = parseAgentTokenMap(values.NIYAM_AGENT_TOKENS);
-    const requester = values.NIYAM_CLI_REQUESTER || Object.keys(tokenMap)[0] || '';
     const baseUrl = values.NIYAM_CLI_BASE_URL
         || values.NIYAM_BASE_URL
         || (values.NIYAM_PORT ? `http://127.0.0.1:${values.NIYAM_PORT}` : '');
-    const agentToken = values.NIYAM_AGENT_TOKEN || tokenMap[requester] || Object.values(tokenMap)[0] || '';
 
     return {
-        baseUrl,
-        requester,
-        agentToken
+        baseUrl
     };
 }
 
@@ -620,19 +768,6 @@ function unquoteEnvValue(value) {
         return value.slice(1, -1);
     }
     return value;
-}
-
-function parseAgentTokenMap(rawValue) {
-    if (!rawValue) {
-        return {};
-    }
-
-    try {
-        const parsed = JSON.parse(rawValue);
-        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
-    } catch (error) {
-        return {};
-    }
 }
 
 async function promptForInput(label) {
@@ -705,12 +840,14 @@ function printUsage() {
     console.log(`niyam-cli ${version}
 
 Commands:
-  niyam-cli setup [--shell zsh|bash] [--env-file .env.local]
+  niyam-cli setup [--shell zsh|bash] [--env-file .env.local] [--reset-auth]
   niyam-cli install --shell zsh|bash
   niyam-cli shell init zsh|bash
   niyam-cli dispatch --command "ls public" [--json]
+  use "--skip-niyam" inside a shell command to bypass interception once
   niyam-cli report-local-result --dispatch-id <id> --exit-code <n> --duration-ms <n>
-  niyam-cli login [--username <name>] [--password <secret>]
+  niyam-cli login [--username <name>] [--password <secret>] [--token <token>] [--quiet]
+  niyam-cli ensure-auth [--token <token>] [--no-prompt]
   niyam-cli logout
   niyam-cli status
   niyam-cli uninstall [--shell zsh|bash] [--purge-config]

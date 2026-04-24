@@ -17,20 +17,15 @@ async function main() {
     const baseUrl = String(process.env.NIYAM_DASHBOARD_SMOKE_BASE_URL || `http://127.0.0.1:${port}`).replace(/\/$/, '');
     const adminUsername = process.env.NIYAM_ADMIN_USERNAME || env.NIYAM_ADMIN_USERNAME || 'admin';
     const adminPassword = process.env.NIYAM_ADMIN_PASSWORD || env.NIYAM_ADMIN_PASSWORD || '';
-    const agentTokens = parseAgentTokens(process.env.NIYAM_AGENT_TOKENS || env.NIYAM_AGENT_TOKENS || '');
-    const agentIdentifier = process.env.NIYAM_DASHBOARD_SMOKE_AGENT || Object.keys(agentTokens)[0] || 'niyam-agent';
-    const agentToken = process.env.NIYAM_DASHBOARD_SMOKE_AGENT_TOKEN || agentTokens[agentIdentifier] || '';
 
     if (!adminPassword) {
         throw new Error('Admin password not found. Set NIYAM_ADMIN_PASSWORD or provide an env file with NIYAM_ADMIN_PASSWORD.');
-    }
-    if (!agentToken) {
-        throw new Error('Agent token not found. Set NIYAM_DASHBOARD_SMOKE_AGENT_TOKEN or NIYAM_AGENT_TOKENS.');
     }
 
     await waitForHealth(baseUrl);
 
     const adminCookie = await login(baseUrl, adminUsername, adminPassword);
+    const managedToken = await createStandaloneToken(baseUrl, adminCookie, 'Dashboard Smoke CLI', `dashboard-smoke-${Date.now()}`);
     const packsBefore = await listPacks(baseUrl, adminCookie);
     const ghPackBefore = packsBefore.find(pack => pack.id === 'gh') || null;
     const createdRuleIds = [];
@@ -77,22 +72,22 @@ async function main() {
     const ghInstallResult = await installPack(baseUrl, adminCookie, 'gh');
     await previewPackUpgrade(baseUrl, adminCookie, 'gh');
 
-    const lowCommand = await submitCommand(baseUrl, agentToken, {
+    const lowCommand = await submitCommand(baseUrl, managedToken, {
         command: 'ls',
         args: ['public'],
         metadata: { source: SMOKE_SOURCE, scenario: 'low_completed' }
     });
-    const mediumPending = await submitCommand(baseUrl, agentToken, {
+    const mediumPending = await submitCommand(baseUrl, managedToken, {
         command: 'printf',
         args: ['dashboard-medium-pending'],
         metadata: { source: SMOKE_SOURCE, scenario: 'medium_pending' }
     });
-    const mediumApproved = await submitCommand(baseUrl, agentToken, {
+    const mediumApproved = await submitCommand(baseUrl, managedToken, {
         command: 'printf',
         args: ['dashboard-medium-safe'],
         metadata: { source: SMOKE_SOURCE, scenario: 'medium_approved_completed' }
     });
-    const highPending = await submitCommand(baseUrl, agentToken, {
+    const highPending = await submitCommand(baseUrl, managedToken, {
         command: 'printf',
         args: ['dashboard-high-pending'],
         metadata: { source: SMOKE_SOURCE, scenario: 'high_pending' }
@@ -183,19 +178,6 @@ function loadEnvFile(filePath) {
     return values;
 }
 
-function parseAgentTokens(raw) {
-    if (!raw) {
-        return {};
-    }
-
-    try {
-        const parsed = JSON.parse(raw);
-        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
-    } catch (error) {
-        return {};
-    }
-}
-
 async function waitForHealth(baseUrl) {
     for (let attempt = 0; attempt < 20; attempt += 1) {
         try {
@@ -229,6 +211,23 @@ async function login(baseUrl, username, password) {
     }
 
     return cookie.split(';')[0];
+}
+
+async function createStandaloneToken(baseUrl, cookie, label, principalIdentifier) {
+    const result = await fetchJson(`${baseUrl}/api/tokens`, {
+        method: 'POST',
+        headers: {
+            Cookie: cookie,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            label,
+            subjectType: 'standalone',
+            principalIdentifier
+        })
+    });
+
+    return result.plainTextToken;
 }
 
 async function ensureRule(baseUrl, cookie, rule) {

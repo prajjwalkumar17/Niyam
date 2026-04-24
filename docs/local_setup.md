@@ -167,12 +167,20 @@ The script will:
 
 - generate local secrets
 - write `.env.local`
-- optionally enable team mode
+- ask for `individual` or `teams` product mode
+- optionally enable self-signup when you chose `teams`
+- optionally seed standalone managed token labels when you chose `individual`
 - install dependencies
 - initialize the database
 - optionally start the server
 
-It can also open a second terminal with the CLI wrapper ready.
+It can also open a second terminal with the CLI wrapper ready. In `individual` mode, it can preconfigure that shell with one of the generated managed tokens.
+
+Important:
+
+- once a database is initialized in `individual` or `teams`, that product mode is locked
+- to switch modes later, clear the database and rebuild from scratch
+- if oneclick asks to overwrite an existing env file, it now clears the configured SQLite database before reinitializing
 
 If you already have `.env.local` and only want to start the app, run the same script and choose:
 
@@ -191,6 +199,23 @@ If you want the full shell and identity workflow after setup, continue with:
 - [Individual setup](./individual_setup.md)
 - [Team setup](./team_setup.md)
 - [CLI wrapper](./cli_wrapper.md)
+
+## Oneclick Output
+
+Oneclick now writes and reports:
+
+- `NIYAM_PRODUCT_MODE`
+- `NIYAM_ENABLE_SELF_SIGNUP`
+- generated standalone token values in `individual` mode, shown once
+- ready-to-run `niyam-cli login --token '<token>'` commands
+
+In `teams` mode, oneclick does not auto-seed user-linked tokens. Instead it points the admin to:
+
+- create users in `Users`
+- optionally create a first token for a user in `Managed Tokens`
+- let each user create more tokens from `Workspace > My CLI Tokens`
+
+In `individual` mode, oneclick seeds standalone token identities only. It does not create extra local users or user-linked tokens.
 
 ## Manual Start
 
@@ -216,7 +241,6 @@ For local development, this is a good baseline:
 
 ```bash
 export NIYAM_ADMIN_PASSWORD=change-me
-export NIYAM_AGENT_TOKENS='{"niyam-agent":"dev-token"}'
 export NIYAM_METRICS_TOKEN=metrics-secret
 export NIYAM_EXEC_ALLOWED_ROOTS="$PWD"
 export NIYAM_EXEC_DEFAULT_MODE=DIRECT
@@ -228,7 +252,6 @@ PowerShell equivalent:
 
 ```powershell
 $env:NIYAM_ADMIN_PASSWORD = "change-me"
-$env:NIYAM_AGENT_TOKENS = '{"niyam-agent":"dev-token"}'
 $env:NIYAM_METRICS_TOKEN = "metrics-secret"
 $env:NIYAM_EXEC_ALLOWED_ROOTS = (Get-Location).Path
 $env:NIYAM_EXEC_DEFAULT_MODE = "DIRECT"
@@ -471,8 +494,8 @@ Run operator-grade backup and benchmark tooling locally:
 ```bash
 npm run backup
 NIYAM_EXEC_DATA_KEY_OLD=local-dev-key NIYAM_EXEC_DATA_KEY_NEW=local-dev-key-2 npm run rotate:exec-key -- --dry-run
-NIYAM_BENCH_BASE_URL=http://127.0.0.1:3000 NIYAM_BENCH_AGENT_TOKEN=dev-token npm run load
-NIYAM_BENCH_BASE_URL=http://127.0.0.1:3000 NIYAM_BENCH_AGENT_TOKEN=dev-token NIYAM_SOAK_DURATION_SECONDS=30 npm run soak
+NIYAM_BENCH_BASE_URL=http://127.0.0.1:3000 npm run load
+NIYAM_BENCH_BASE_URL=http://127.0.0.1:3000 NIYAM_SOAK_DURATION_SECONDS=30 npm run soak
 ```
 
 What they cover:

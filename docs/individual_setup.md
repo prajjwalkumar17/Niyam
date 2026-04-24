@@ -21,7 +21,8 @@ By the end of this setup:
 - Niyam is running locally
 - the dashboard works with the bootstrap `admin` user
 - the CLI wrapper is installed in your shell
-- commands can go through Niyam from the terminal
+- standalone managed tokens can be created for each CLI or agent identity
+- commands can go through Niyam from the terminal under names such as `June` or `January`
 
 ## Fastest Path
 
@@ -38,19 +39,21 @@ Choose:
 
 When prompted:
 
-- `Activate team mode (self-signup requests + admin approval)?` → answer `n`
+- `Product mode` → choose `Individual`
+- `Standalone CLI token labels` → optionally enter names such as `June,January`
 - `Start the server when setup finishes?` → answer `y`
 
 If oneclick offers to open a second terminal with the wrapper ready, you can answer `y`.
 
 ## What Oneclick Gives You
 
-In single-user mode, oneclick writes `.env.local`, initializes the database, and starts Niyam.
+In individual mode, oneclick writes `.env.local`, initializes the database, and starts Niyam.
 
 It also prints:
 
 - dashboard URL
 - admin username and password source
+- generated standalone token labels and one-time token values if you seeded them
 - wrapper install commands
 - `niyam-on` and `niyam-off`
 
@@ -64,49 +67,42 @@ npm run cli:install
 source ~/.zshrc
 ```
 
-## Choose How Commands Should Appear
+## Recommended Identity Model
 
-You have two valid single-user patterns.
+The default individual-mode pattern is one managed token per CLI or agent.
 
-### Option 1. Agent Mode
+### Managed Token Identities
 
-This is the simplest local demo mode.
+In the dashboard:
 
-Commands appear as the configured agent identity.
+1. Sign in as `admin`
+2. Open `Tokens`
+3. Use `Managed Tokens`
+4. Create a standalone token with:
+   - label: `June`
+   - identity: `June`
+5. Repeat for `January` or any other CLI name
+
+Then log a shell into that token:
+
+```bash
+niyam-cli login --token '<token>'
+```
 
 Check:
 
-```bash
-node /Users/prajjwal.kumar/Projects/Niyam/bin/niyam-cli.js status
-```
-
-You should see something like:
-
 ```text
-Auth mode: agent-token
-Principal: niyam-agent · agent
+Auth mode: managed-token
+Principal: June · agent
+Token label: June
 ```
 
-### Option 2. Local User Mode
+This is the cleanest demo because audit, history, and pending views show the exact CLI identity.
 
-Use this if you want your terminal commands to appear as `admin` instead of as an agent.
+You can also enable auto approval for a standalone identity from `Tokens > Managed Tokens`.
 
-```bash
-node /Users/prajjwal.kumar/Projects/Niyam/bin/niyam-cli.js login --username admin --password '<your-admin-password>'
-```
-
-Then verify:
-
-```bash
-node /Users/prajjwal.kumar/Projects/Niyam/bin/niyam-cli.js status
-```
-
-Expected:
-
-```text
-Auth mode: local-user-session
-Principal: admin · user
-```
+- `MEDIUM` risk commands from that standalone identity auto-approve immediately
+- `HIGH` risk commands record one approval from `niyam-auto-approver` and still wait for one human approval
 
 ## Use It
 
@@ -147,5 +143,7 @@ source ~/.zshrc
 Move to [Team setup](./team_setup.md) when:
 
 - more than one person needs their own identity
+- you want real local dashboard users beyond the bootstrap `admin`
 - you want `HIGH` risk dual approval across different users
 - you want self-signup requests or admin-managed user access
+- you want each human user to create and block their own CLI tokens

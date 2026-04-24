@@ -5,6 +5,8 @@
 .deploy/
 .dist/
 .local/
+playwright-report/
+test-results/
 *.log
 *.pid
 .DS_Store

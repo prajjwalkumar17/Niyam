@@ -134,6 +134,24 @@ async function cleanupBenchRule(baseUrl, cookie, ruleState) {
     });
 }
 
+async function createBenchmarkToken(baseUrl, cookie) {
+    const created = await requestJson(baseUrl, '/api/tokens', {
+        method: 'POST',
+        cookie,
+        body: {
+            label: 'Benchmark CLI',
+            subjectType: 'standalone',
+            principalIdentifier: `benchmark-${Date.now()}`
+        }
+    });
+
+    if (created.status !== 201) {
+        throw new Error(`Failed to create benchmark token: HTTP ${created.status}`);
+    }
+
+    return created.json.plainTextToken;
+}
+
 async function sampleRssKb(pid) {
     if (!pid) {
         return null;
@@ -228,15 +246,12 @@ async function runBenchmark(options = {}) {
     const baseUrl = String(options.baseUrl || process.env.NIYAM_BENCH_BASE_URL || 'http://127.0.0.1:3000').replace(/\/$/, '');
     const username = process.env.NIYAM_BENCH_ADMIN_USERNAME || 'admin';
     const password = process.env.NIYAM_BENCH_ADMIN_PASSWORD || process.env.NIYAM_ADMIN_PASSWORD || 'admin';
-    const agentToken = process.env.NIYAM_BENCH_AGENT_TOKEN || process.env.NIYAM_AGENT_TOKEN || '';
+    const managedToken = process.env.NIYAM_BENCH_MANAGED_TOKEN || '';
     const concurrency = Number.parseInt(String(options.concurrency), 10);
     const maxOperations = Number.parseInt(String(options.maxOperations || 0), 10);
     const durationSeconds = Number.parseInt(String(options.durationSeconds || 0), 10);
     const serverPid = process.env.NIYAM_SERVER_PID || '';
 
-    if (!agentToken) {
-        throw new Error('NIYAM_BENCH_AGENT_TOKEN or NIYAM_AGENT_TOKEN is required');
-    }
     if (!Number.isFinite(concurrency) || concurrency <= 0) {
         throw new Error('Benchmark concurrency must be a positive integer');
     }
@@ -245,6 +260,7 @@ async function runBenchmark(options = {}) {
     }
 
     const cookie = await login(baseUrl, username, password);
+    const benchmarkToken = managedToken || await createBenchmarkToken(baseUrl, cookie);
     const ruleState = await ensureBenchRule(baseUrl, cookie);
     const latencies = [];
     const operationCounts = {};
@@ -276,7 +292,7 @@ async function runBenchmark(options = {}) {
             const beganAt = Date.now();
 
             try {
-                await runOperation(baseUrl, cookie, agentToken, operation);
+                await runOperation(baseUrl, cookie, benchmarkToken, operation);
                 latencies.push(Date.now() - beganAt);
                 operationCounts[operation] = (operationCounts[operation] || 0) + 1;
             } catch (error) {

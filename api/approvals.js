@@ -3,8 +3,10 @@
  */
 
 const { v4: uuidv4 } = require('uuid');
+const { addAuthDetails, toAuthColumns } = require('../services/auth-context');
+const { AUTO_APPROVER_IDENTIFIER } = require('../services/approval-automation');
 const { logAudit } = require('../services/audit-log');
-const { shapeCommandRecord } = require('../services/record-shaping');
+const { shapeApprovalRecord, shapeCommandRecord } = require('../services/record-shaping');
 const { checkTwoPersonApproval, validateSeparateApprover } = require('../safety/two-person');
 const { validateRationale } = require('../safety/rationale');
 const { validateApprovalPayload, validationError } = require('./validation');
@@ -85,15 +87,28 @@ function createApprovalsRouter(db, broadcast, hooks = {}) {
         
         // Record the approval
         const approvalId = uuidv4();
+        const authColumns = toAuthColumns(req.authentication);
         db.prepare(`
-            INSERT INTO approvals (id, command_id, approver, decision, rationale, created_at)
-            VALUES (?, ?, ?, 'approved', ?, ?)
-        `).run(approvalId, commandId, approver, rationale || null, new Date().toISOString());
+            INSERT INTO approvals (id, command_id, approver, auth_mode, auth_credential_id, auth_credential_label, decision, rationale, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'approved', ?, ?)
+        `).run(
+            approvalId,
+            commandId,
+            approver,
+            authColumns.authMode,
+            authColumns.authCredentialId,
+            authColumns.authCredentialLabel,
+            rationale || null,
+            new Date().toISOString()
+        );
         
         // Update approval count
         const newCount = db.prepare(
             "SELECT COUNT(*) as count FROM approvals WHERE command_id = ? AND decision = 'approved'"
         ).get(commandId).count;
+        const approvedApprovers = db.prepare(
+            "SELECT approver FROM approvals WHERE command_id = ? AND decision = 'approved' ORDER BY created_at ASC"
+        ).all(commandId).map(row => row.approver);
         const now = new Date().toISOString();
         
         // Check if we have enough approvals
@@ -107,12 +122,16 @@ function createApprovalsRouter(db, broadcast, hooks = {}) {
             `).run(newCount, now, commandId);
             
             logAudit(db, 'command_approved', 'command', commandId, approver, {
-                command: shapedCmd.command,
-                args: shapedCmd.args,
-                approvalCount: newCount,
-                requiredApprovals: cmd.required_approvals,
-                approver,
-                rationale: rationale || null
+                ...addAuthDetails({
+                    command: shapedCmd.command,
+                    args: shapedCmd.args,
+                    approvalCount: newCount,
+                    requiredApprovals: cmd.required_approvals,
+                    approver,
+                    approvedBy: approvedApprovers,
+                    approvalMode: approvedApprovers.includes(AUTO_APPROVER_IDENTIFIER) ? 'auto_agent_plus_human' : 'manual',
+                    rationale: rationale || null
+                }, req.authentication)
             });
             
             if (broadcast) {
@@ -132,14 +151,18 @@ function createApprovalsRouter(db, broadcast, hooks = {}) {
             `).run(newCount, now, commandId);
             
             logAudit(db, 'approval_granted', 'command', commandId, approver, {
-                command: shapedCmd.command,
-                args: shapedCmd.args,
-                approvalCount: newCount,
-                requiredApprovals: cmd.required_approvals,
-                approver,
-                stillPending: true,
-                pendingReason: twoPersonState.reason,
-                rationale: rationale || null
+                ...addAuthDetails({
+                    command: shapedCmd.command,
+                    args: shapedCmd.args,
+                    approvalCount: newCount,
+                    requiredApprovals: cmd.required_approvals,
+                    approver,
+                    approvedBy: approvedApprovers,
+                    stillPending: true,
+                    approvalMode: approvedApprovers.includes(AUTO_APPROVER_IDENTIFIER) ? 'auto_agent' : 'manual',
+                    pendingReason: twoPersonState.reason,
+                    rationale: rationale || null
+                }, req.authentication)
             });
             
             if (broadcast) {
@@ -209,10 +232,20 @@ function createApprovalsRouter(db, broadcast, hooks = {}) {
         
         // Record the rejection
         const approvalId = uuidv4();
+        const authColumns = toAuthColumns(req.authentication);
         db.prepare(`
-            INSERT INTO approvals (id, command_id, approver, decision, rationale, created_at)
-            VALUES (?, ?, ?, 'rejected', ?, ?)
-        `).run(approvalId, commandId, approver, rationale || 'No rationale provided', new Date().toISOString());
+            INSERT INTO approvals (id, command_id, approver, auth_mode, auth_credential_id, auth_credential_label, decision, rationale, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'rejected', ?, ?)
+        `).run(
+            approvalId,
+            commandId,
+            approver,
+            authColumns.authMode,
+            authColumns.authCredentialId,
+            authColumns.authCredentialLabel,
+            rationale || 'No rationale provided',
+            new Date().toISOString()
+        );
         
         // Mark command as rejected
         db.prepare(`
@@ -220,10 +253,12 @@ function createApprovalsRouter(db, broadcast, hooks = {}) {
         `).run(new Date().toISOString(), commandId);
         
         logAudit(db, 'command_rejected', 'command', commandId, approver, {
-            command: shapedCmd.command,
-            args: shapedCmd.args,
-            approver,
-            rationale: rationale || 'No rationale provided'
+            ...addAuthDetails({
+                command: shapedCmd.command,
+                args: shapedCmd.args,
+                approver,
+                rationale: rationale || 'No rationale provided'
+            }, req.authentication)
         });
         
         if (broadcast) {
@@ -249,7 +284,7 @@ function createApprovalsRouter(db, broadcast, hooks = {}) {
             'SELECT * FROM approvals WHERE command_id = ? ORDER BY created_at DESC'
         ).all(req.params.commandId);
         
-        res.json(approvals);
+        res.json(approvals.map(shapeApprovalRecord));
     });
 
     // List pending approvals (commands needing approval)

@@ -1,0 +1,121 @@
+name: core
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  node-tests:
+    name: node tests (${{ matrix.os }}, node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            node: 18
+          - os: ubuntu-latest
+            node: 20
+          - os: macos-latest
+            node: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  shell-check:
+    name: shell checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - run: npm ci
+      - run: NIYAM_REQUIRE_SHELLCHECK=1 npm run verify:shell
+
+  smoke:
+    name: smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: NIYAM_SMOKE_ARTIFACT_DIR="$RUNNER_TEMP/smoke/basic" npm run smoke
+      - run: NIYAM_SMOKE_ARTIFACT_DIR="$RUNNER_TEMP/smoke/wrapper" npm run smoke:wrapper
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-artifacts
+          path: ${{ runner.temp }}/smoke
+
+  browser:
+    name: browser smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run verify:browser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-artifacts
+          path: |
+            playwright-report
+            test-results
+
+  docker:
+    name: docker smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: NIYAM_DOCKER_SMOKE_ARTIFACT_DIR="$RUNNER_TEMP/docker-smoke" npm run verify:docker
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: docker-smoke-artifacts
+          path: ${{ runner.temp }}/docker-smoke
+
+  oneclick:
+    name: oneclick (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: NIYAM_TEST_ARTIFACT_ROOT="$RUNNER_TEMP/oneclick" npm run verify:oneclick
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: oneclick-artifacts-${{ matrix.os }}
+          path: ${{ runner.temp }}/oneclick

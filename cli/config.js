@@ -77,8 +77,7 @@ function ensureCliConfig(overrides = {}, options = {}) {
 function getDefaultCliConfig() {
     return {
         baseUrl: process.env.NIYAM_CLI_BASE_URL || process.env.NIYAM_BASE_URL || 'http://127.0.0.1:3000',
-        agentToken: process.env.NIYAM_AGENT_TOKEN || '',
-        requester: process.env.NIYAM_CLI_REQUESTER || '',
+        managedToken: '',
         sessionCookie: '',
         connectTimeoutMs: parseIntEnv(process.env.NIYAM_CLI_CONNECT_TIMEOUT_MS, 5000),
         pollIntervalMs: parseIntEnv(process.env.NIYAM_CLI_POLL_INTERVAL_MS, 1000),
@@ -91,12 +90,6 @@ function getExplicitEnvOverrides() {
     const overrides = {};
     if (process.env.NIYAM_CLI_BASE_URL || process.env.NIYAM_BASE_URL) {
         overrides.baseUrl = process.env.NIYAM_CLI_BASE_URL || process.env.NIYAM_BASE_URL;
-    }
-    if (process.env.NIYAM_AGENT_TOKEN) {
-        overrides.agentToken = process.env.NIYAM_AGENT_TOKEN;
-    }
-    if (process.env.NIYAM_CLI_REQUESTER) {
-        overrides.requester = process.env.NIYAM_CLI_REQUESTER;
     }
     if (process.env.NIYAM_CLI_CONNECT_TIMEOUT_MS) {
         overrides.connectTimeoutMs = parseIntEnv(process.env.NIYAM_CLI_CONNECT_TIMEOUT_MS, 5000);
