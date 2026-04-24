@@ -70,7 +70,6 @@ Use [../deploy/niyam.env.example](../deploy/niyam.env.example) as the base.
 Recommended production values:
 
 - strong `NIYAM_ADMIN_PASSWORD`
-- explicit `NIYAM_AGENT_TOKENS`
 - `NIYAM_DATA_DIR` and `NIYAM_DB` outside the repo
 - strict `NIYAM_EXEC_ALLOWED_ROOTS`
 - metrics token enabled
@@ -91,7 +90,6 @@ The important parts are:
 Make sure your environment file also includes:
 
 - `NIYAM_EXEC_DATA_KEY`
-- `NIYAM_AGENT_TOKENS`
 - `NIYAM_METRICS_TOKEN`
 - backup settings if you want automated snapshots
 

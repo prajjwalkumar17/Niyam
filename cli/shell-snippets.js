@@ -84,7 +84,12 @@ function renderZshBootstrapSnippet(cliBinPath) {
 [[ -o interactive ]] || return 0
 export NIYAM_CLI_BIN=${quotedBin}
 
+niyam-cli() {
+  command "$NIYAM_CLI_BIN" "$@"
+}
+
 niyam-on() {
+  command "$NIYAM_CLI_BIN" ensure-auth || return $?
   command "$NIYAM_CLI_BIN" install --shell zsh || return $?
   source "$HOME/.zshrc"
 }
@@ -213,7 +218,7 @@ __niyam_accept_line() {
   local dispatch_command="$raw"
   local dispatch_first_token="$first_token"
 
-  if [[ "\${trimmed[1]}" == "#" || "$first_token" == "niyam-cli" || "$first_token" == "$NIYAM_CLI_BIN" ]]; then
+  if [[ "\${trimmed[1]}" == "#" || "$first_token" == "niyam-cli" || "$first_token" == "niyam-on" || "$first_token" == "niyam-off" || "$first_token" == "$NIYAM_CLI_BIN" ]]; then
     print -s -- "$raw"
     __niyam_zsh_begin_command
     eval "$raw"
@@ -255,7 +260,13 @@ __niyam_accept_line() {
       return $rc
       ;;
     86)
-      eval "$raw"
+      local bypass_command=''
+      if [[ "$local_result" == *$'\\n'local_command=* ]]; then
+        bypass_command="\${local_result##*$'\\n'local_command=}"
+      elif [[ "$local_result" == local_command=* ]]; then
+        bypass_command="\${local_result#local_command=}"
+      fi
+      eval "\${bypass_command:-$raw}"
       rc=$?
       __niyam_zsh_safe_finish
       return $rc
@@ -281,7 +292,12 @@ case $- in
 esac
 export NIYAM_CLI_BIN=${quotedBin}
 
+niyam-cli() {
+  command "$NIYAM_CLI_BIN" "$@"
+}
+
 niyam-on() {
+  command "$NIYAM_CLI_BIN" ensure-auth || return $?
   command "$NIYAM_CLI_BIN" install --shell bash || return $?
   source "$HOME/.bashrc"
 }
@@ -409,7 +425,7 @@ __niyam_bash_accept_line() {
   local dispatch_command="$raw"
   local dispatch_first_token="$first_token"
 
-  if [[ "$trimmed" == \#* || "$first_token" == "niyam-cli" || "$first_token" == "$NIYAM_CLI_BIN" ]]; then
+  if [[ "$trimmed" == \#* || "$first_token" == "niyam-cli" || "$first_token" == "niyam-on" || "$first_token" == "niyam-off" || "$first_token" == "$NIYAM_CLI_BIN" ]]; then
     builtin history -s "$raw"
     __niyam_bash_begin_command
     eval "$raw"
@@ -449,7 +465,13 @@ __niyam_bash_accept_line() {
       return
       ;;
     86)
-      eval "$raw"
+      local bypass_command=''
+      if [[ "$local_result" == *$'\\n'local_command=* ]]; then
+        bypass_command="\${local_result##*$'\\n'local_command=}"
+      elif [[ "$local_result" == local_command=* ]]; then
+        bypass_command="\${local_result#local_command=}"
+      fi
+      eval "\${bypass_command:-$raw}"
       __niyam_bash_finish_command
       return
       ;;

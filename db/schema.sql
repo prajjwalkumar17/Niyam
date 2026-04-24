@@ -8,6 +8,9 @@ CREATE TABLE IF NOT EXISTS commands (
     args TEXT,                    -- JSON array of arguments
     requester TEXT NOT NULL,      -- Agent or user who submitted
     requester_type TEXT DEFAULT 'agent', -- 'agent' or 'user'
+    auth_mode TEXT,
+    auth_credential_id TEXT,
+    auth_credential_label TEXT,
     risk_level TEXT NOT NULL,     -- 'HIGH', 'MEDIUM', 'LOW'
     status TEXT DEFAULT 'pending', -- 'pending', 'approved', 'rejected', 'executing', 'completed', 'failed', 'timeout'
     created_at TEXT NOT NULL,
@@ -35,6 +38,9 @@ CREATE TABLE IF NOT EXISTS approvals (
     id TEXT PRIMARY KEY,
     command_id TEXT NOT NULL,
     approver TEXT NOT NULL,
+    auth_mode TEXT,
+    auth_credential_id TEXT,
+    auth_credential_label TEXT,
     decision TEXT NOT NULL,       -- 'approved' or 'rejected'
     rationale TEXT,
     created_at TEXT NOT NULL,
@@ -95,6 +101,8 @@ CREATE TABLE IF NOT EXISTS local_users (
     display_name TEXT,
     password_hash TEXT NOT NULL,
     enabled INTEGER DEFAULT 1,
+    auto_approval_enabled INTEGER DEFAULT 0,
+    auto_approval_mode TEXT DEFAULT 'off',
     roles TEXT NOT NULL,
     last_login_at TEXT,
     created_at TEXT NOT NULL,
@@ -131,11 +139,41 @@ CREATE TABLE IF NOT EXISTS sessions (
     FOREIGN KEY (user_id) REFERENCES local_users(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS managed_tokens (
+    id TEXT PRIMARY KEY,
+    label TEXT NOT NULL,
+    subject_type TEXT NOT NULL,
+    user_id TEXT,
+    principal_identifier TEXT,
+    principal_display_name TEXT,
+    auto_approval_enabled INTEGER DEFAULT 0,
+    auto_approval_mode TEXT DEFAULT 'off',
+    token_hash TEXT NOT NULL UNIQUE,
+    token_prefix TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    last_used_at TEXT,
+    blocked_at TEXT,
+    blocked_by TEXT,
+    metadata TEXT,
+    FOREIGN KEY (user_id) REFERENCES local_users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS runtime_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS cli_dispatches (
     id TEXT PRIMARY KEY,
     command TEXT NOT NULL,
     requester TEXT NOT NULL,
     requester_type TEXT DEFAULT 'agent',
+    auth_mode TEXT,
+    auth_credential_id TEXT,
+    auth_credential_label TEXT,
     metadata TEXT,
     exec_command TEXT,
     working_dir TEXT,
@@ -181,6 +219,9 @@ CREATE INDEX IF NOT EXISTS idx_signup_requests_status ON signup_requests(status)
 CREATE INDEX IF NOT EXISTS idx_signup_requests_username ON signup_requests(username);
 CREATE INDEX IF NOT EXISTS idx_signup_requests_requested_at ON signup_requests(requested_at);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
+CREATE INDEX IF NOT EXISTS idx_managed_tokens_status ON managed_tokens(status);
+CREATE INDEX IF NOT EXISTS idx_managed_tokens_user_id ON managed_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_managed_tokens_principal_identifier ON managed_tokens(principal_identifier);
 CREATE INDEX IF NOT EXISTS idx_cli_dispatches_route ON cli_dispatches(route);
 CREATE INDEX IF NOT EXISTS idx_cli_dispatches_status ON cli_dispatches(status);
 CREATE INDEX IF NOT EXISTS idx_cli_dispatches_requester ON cli_dispatches(requester);

@@ -12,9 +12,7 @@ class AgentClient {
         const sessionCookie = hasExplicitSessionCookie ? options.sessionCookie : '';
         this.baseUrl = options.baseUrl || 'http://localhost:3000';
         this.agentName = hasExplicitAgentName ? options.agentName : 'niyam-agent';
-        this.apiToken = hasExplicitApiToken
-            ? options.apiToken
-            : (sessionCookie ? '' : (process.env.NIYAM_AGENT_TOKEN || ''));
+        this.apiToken = hasExplicitApiToken ? options.apiToken : '';
         this.sessionCookie = sessionCookie;
         this.timeout = options.timeout || 10000;
     }

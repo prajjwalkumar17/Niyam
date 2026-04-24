@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-ROOT_DIR=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+ROOT_DIR=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
 ACTION=${1:-render}
 
 SERVICE_NAME=${NIYAM_SERVICE_NAME:-niyam}
@@ -45,15 +45,40 @@ render_all() {
 
 install_app() {
     mkdir -p "$INSTALL_DIR" "$DATA_DIR"
-    tar \
+
+    set -- \
         --exclude=.git \
+        --exclude=.env \
+        --exclude=.env.* \
         --exclude=node_modules \
         --exclude=.dist \
         --exclude=.deploy \
+        --exclude=.local \
+        --exclude=playwright-report \
+        --exclude=test-results \
         --exclude='data/*.db' \
         --exclude='data/*.db-shm' \
-        --exclude='data/*.db-wal' \
-        -cf - -C "$ROOT_DIR" . | tar -xf - -C "$INSTALL_DIR"
+        --exclude='data/*.db-wal'
+
+    case "$INSTALL_DIR" in
+        "$ROOT_DIR"/*)
+            set -- "$@" "--exclude=${INSTALL_DIR#"$ROOT_DIR"/}"
+            ;;
+    esac
+
+    case "$DATA_DIR" in
+        "$ROOT_DIR"/*)
+            set -- "$@" "--exclude=${DATA_DIR#"$ROOT_DIR"/}"
+            ;;
+    esac
+
+    case "$RENDER_DIR" in
+        "$ROOT_DIR"/*)
+            set -- "$@" "--exclude=${RENDER_DIR#"$ROOT_DIR"/}"
+            ;;
+    esac
+
+    tar "$@" -cf - -C "$ROOT_DIR" . | tar -xf - -C "$INSTALL_DIR"
     cp "$ROOT_DIR/deploy/niyam.env.example" "$INSTALL_DIR/.env.production"
 }
 

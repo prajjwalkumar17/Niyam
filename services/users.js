@@ -2,6 +2,12 @@ const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 
 const { config } = require('../config');
+const {
+    AUTO_APPROVAL_MODE_OFF,
+    autoApprovalModeFromStored,
+    isAutoApprovalEnabled,
+    normalizeAutoApprovalMode
+} = require('./auto-approval-modes');
 const { parseJson } = require('./record-shaping');
 
 const PASSWORD_SCHEME = 'scrypt-v1';
@@ -18,9 +24,9 @@ function createUsersService(db) {
         getAgentApprover: db.prepare("SELECT * FROM approvers WHERE identifier = ?"),
         insertUser: db.prepare(`
             INSERT INTO local_users (
-                id, username, display_name, password_hash, enabled,
+                id, username, display_name, password_hash, enabled, auto_approval_enabled, auto_approval_mode,
                 roles, last_login_at, created_at, updated_at, metadata
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `),
         updateUser: db.prepare(`
             UPDATE local_users SET
@@ -40,6 +46,13 @@ function createUsersService(db) {
         updateLastLoginAt: db.prepare(`
             UPDATE local_users SET
                 last_login_at = ?,
+                updated_at = ?
+            WHERE id = ?
+        `),
+        updateAutoApprovalMode: db.prepare(`
+            UPDATE local_users SET
+                auto_approval_enabled = ?,
+                auto_approval_mode = ?,
                 updated_at = ?
             WHERE id = ?
         `),
@@ -112,6 +125,7 @@ function createUsersService(db) {
         const normalizedRoles = normalizeRoles(payload.roles || []);
         const metadata = payload.metadata || {};
         const passwordHash = payload.passwordHash || hashPassword(payload.password);
+        const autoApprovalMode = normalizeAutoApprovalMode(payload.autoApprovalMode, payload.autoApprovalEnabled ? 'normal' : AUTO_APPROVAL_MODE_OFF);
 
         statements.insertUser.run(
             userId,
@@ -119,6 +133,8 @@ function createUsersService(db) {
             payload.displayName || null,
             passwordHash,
             payload.enabled ? 1 : 0,
+            isAutoApprovalEnabled(autoApprovalMode) ? 1 : 0,
+            autoApprovalMode,
             JSON.stringify(normalizedRoles),
             null,
             now,
@@ -339,6 +355,24 @@ function createUsersService(db) {
         return getUserById(txSetPassword(userId, password).id);
     }
 
+    function setAutoApprovalPreference(userId, mode) {
+        const current = getUserRecordById(userId);
+        if (!current) {
+            const error = new Error('User not found');
+            error.code = 'not_found';
+            throw error;
+        }
+
+        const normalizedMode = normalizeAutoApprovalMode(mode);
+        statements.updateAutoApprovalMode.run(
+            isAutoApprovalEnabled(normalizedMode) ? 1 : 0,
+            normalizedMode,
+            new Date().toISOString(),
+            userId
+        );
+        return getUserById(userId);
+    }
+
     function changeOwnPassword(userId, currentPassword, nextPassword) {
         const current = getUserRecordById(userId);
         if (!current) {
@@ -407,10 +441,13 @@ function createUsersService(db) {
 
         return {
             type: 'user',
+            userId: user.id,
             identifier: user.username,
             displayName: user.display_name || user.username,
             roles,
-            approvalCapabilities
+            approvalCapabilities,
+            autoApprovalEnabled: isAutoApprovalEnabled(autoApprovalModeFromStored(user.auto_approval_mode, user.auto_approval_enabled)),
+            autoApprovalMode: autoApprovalModeFromStored(user.auto_approval_mode, user.auto_approval_enabled)
         };
     }
 
@@ -439,6 +476,7 @@ function createUsersService(db) {
                 displayName: 'Admin',
                 password: config.ADMIN_PASSWORD,
                 enabled: true,
+                autoApprovalMode: AUTO_APPROVAL_MODE_OFF,
                 roles: ['admin'],
                 approvalCapabilities: {
                     canApproveMedium: true,
@@ -583,6 +621,7 @@ function createUsersService(db) {
         listSignupRequests,
         listUsers,
         rejectSignupRequest,
+        setAutoApprovalPreference,
         setPassword,
         syncAllLocalUserApprovers,
         updateUser
@@ -621,6 +660,8 @@ function shapeLocalUser(userRow, approverRow) {
         username: userRow.username,
         displayName: userRow.display_name || userRow.username,
         enabled: Boolean(userRow.enabled),
+        autoApprovalEnabled: isAutoApprovalEnabled(autoApprovalModeFromStored(userRow.auto_approval_mode, userRow.auto_approval_enabled)),
+        autoApprovalMode: autoApprovalModeFromStored(userRow.auto_approval_mode, userRow.auto_approval_enabled),
         roles: normalizeRoles(parseRoles(userRow.roles)),
         approvalCapabilities: shapeApprovalCapabilities(approverRow),
         lastLoginAt: userRow.last_login_at || null,

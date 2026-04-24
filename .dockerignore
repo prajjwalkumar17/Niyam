@@ -1,0 +1,11 @@
+.git
+.github
+.deploy
+.dist
+.local
+node_modules
+coverage
+playwright-report
+test-results
+npm-debug.log
+.DS_Store

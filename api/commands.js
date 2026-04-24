@@ -3,9 +3,10 @@
  */
 
 const { redactCommandInput } = require('../security/redaction');
+const { addAuthDetails } = require('../services/auth-context');
 const { logAudit } = require('../services/audit-log');
 const { persistCommandSubmission, prepareCommandSubmission } = require('../services/command-submissions');
-const { shapeCommandRecord } = require('../services/record-shaping');
+const { shapeApprovalRecord, shapeCommandRecord } = require('../services/record-shaping');
 const { validateCommandPayload, validationError } = require('./validation');
 
 function createCommandsRouter(db, broadcast, hooks = {}) {
@@ -33,9 +34,11 @@ function createCommandsRouter(db, broadcast, hooks = {}) {
                 metadata
             });
             logAudit(db, 'command_blocked', 'command', null, requester, {
-                command: blockedInput.command,
-                args: blockedInput.args,
-                reason: evaluation.reason
+                ...addAuthDetails({
+                    command: blockedInput.command,
+                    args: blockedInput.args,
+                    reason: evaluation.reason
+                }, req.authentication)
             });
 
             return res.status(403).json({
@@ -49,6 +52,7 @@ function createCommandsRouter(db, broadcast, hooks = {}) {
             db,
             broadcast,
             onApproved: hooks.onApproved,
+            principal: req.principal,
             requester,
             requesterType,
             command,
@@ -57,7 +61,8 @@ function createCommandsRouter(db, broadcast, hooks = {}) {
             timeoutHours,
             workingDir,
             evaluation,
-            redactedInput
+            redactedInput,
+            authentication: req.authentication
         });
 
         res.status(201).json(commandData);
@@ -71,7 +76,7 @@ function createCommandsRouter(db, broadcast, hooks = {}) {
 
         const shaped = shapeCommandRecord(cmd);
         const approvals = db.prepare('SELECT * FROM approvals WHERE command_id = ? ORDER BY created_at ASC').all(req.params.id);
-        shaped.approvals = approvals;
+        shaped.approvals = approvals.map(shapeApprovalRecord);
         applyApprovalSummary(shaped, approvals);
         res.json(shaped);
     });
@@ -189,15 +194,18 @@ function applyApprovalSummary(command, approvals) {
         .map(approval => approval.approver);
     const rejectedDecision = approvals.find(approval => approval.decision === 'rejected');
     const distinctApprovers = [...new Set(approvedBy.filter(approver => approver !== command.requester))];
-    const twoPersonSatisfied = command.risk_level !== 'HIGH' || distinctApprovers.length >= 2;
+    const requiredApprovals = Number(command.required_approvals || 0);
+    const twoPersonSatisfied = command.risk_level !== 'HIGH'
+        || requiredApprovals <= 1
+        || distinctApprovers.length >= 2;
     const approvalCount = approvedBy.length;
 
     command.approvedBy = approvedBy;
     command.rejectedBy = rejectedDecision ? rejectedDecision.approver : null;
     command.approvalProgress = {
         count: approvalCount,
-        required: Number(command.required_approvals || 0),
-        remaining: Math.max(0, Number(command.required_approvals || 0) - approvalCount),
+        required: requiredApprovals,
+        remaining: Math.max(0, requiredApprovals - approvalCount),
         twoPersonSatisfied
     };
     command.approval_count = approvalCount;

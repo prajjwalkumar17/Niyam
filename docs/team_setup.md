@@ -23,6 +23,7 @@ The model is:
 - one shared dashboard and audit trail
 - one local Niyam account per person
 - one CLI wrapper install per developer machine
+- optional user-linked CLI tokens per machine, per CLI, or per workflow
 
 Important:
 
@@ -45,7 +46,8 @@ Choose one of these:
 
 When prompted:
 
-- `Activate team mode (self-signup requests + admin approval)?` → answer `y`
+- `Product mode` → choose `Teams`
+- `Enable self-signup requests?` → choose based on whether you want request/approval onboarding
 
 Make sure the resulting Niyam URL is reachable from other developer machines.
 
@@ -66,6 +68,7 @@ Create each person manually:
 3. Set initial password
 4. Grant `Can approve MEDIUM` or `Can approve HIGH` as needed
 5. Save
+6. Optionally create that user's first CLI token from `Managed Tokens`
 
 ### Model 2. Self-Signup Requests
 
@@ -80,6 +83,25 @@ Admin then:
 3. Approves or rejects the request
 4. Assigns admin and approval capabilities as needed
 
+## CLI Token Model In Teams Mode
+
+Teams mode keeps local dashboard users for humans, but CLI access does not need to stay tied to password login.
+
+Recommended pattern:
+
+- admin creates the local user account
+- admin may create the first token for that user from `Users > Managed Tokens`
+- each user later signs into the dashboard and creates more tokens from `Workspace > My CLI Tokens`
+- each user can also enable or disable their own auto-approval mode from `Workspace > Approval Automation`
+
+These local-user and user-linked-token flows are teams-only. They are hidden and inactive when the instance runs in `individual` mode.
+
+Why this matters:
+
+- one user can keep separate tokens for Cursor, Claude Code, a CI wrapper, or a local agent shell
+- audit and history still show the real user
+- token label is preserved as secondary context, for example `alice via Cursor CLI`
+
 ## Developer Machine Setup
 
 On each developer machine, in that machine's Niyam checkout:
@@ -89,23 +111,32 @@ export NIYAM_CLI_BASE_URL='https://niyam.company.internal'
 cd /path/to/Niyam
 npm run cli:install
 source ~/.zshrc
-node bin/niyam-cli.js login --username <user> --password '<password>'
+niyam-cli login --token '<user-token>'
 ```
 
 Then verify:
 
 ```bash
-node bin/niyam-cli.js status
+niyam-cli status
 ```
 
 Expected:
 
 ```text
-Auth mode: local-user-session
+Auth mode: managed-token
 Principal: <user> · user
+Token label: <cli-label>
 ```
 
-That means commands from that developer's terminal will appear in the dashboard as that user.
+That means commands from that developer's terminal will appear in the dashboard as that user, with the CLI label preserved in audit and history.
+
+Password login still works:
+
+```bash
+niyam-cli login --username <user> --password '<password>'
+```
+
+Use password login when you explicitly want the shell to use the local dashboard session rather than a user-linked token.
 
 ## What Each Developer Gets
 
@@ -114,11 +145,22 @@ After login:
 - their commands appear in Pending and History as their username
 - they can approve commands if their account allows it
 - their approvals show up in Audit under their own identity
+- when they used a token, the token label is also recorded
 
 Example:
 
-- Alice runs a command from her laptop → dashboard requester is `alice`
-- Bob approves it from his laptop → approval is recorded as `bob`
+- Alice runs a command from her laptop using a token labeled `Cursor CLI` → dashboard requester is `alice`, with `via Cursor CLI`
+- Bob approves it from his laptop using a token labeled `Claude Code` → approval is recorded as `bob`, with `via Claude Code`
+
+## Team Auto Approval
+
+When a user enables auto approval from `Workspace`:
+
+- `MEDIUM` risk commands submitted by that user or any of their user-linked tokens are approved automatically
+- `HIGH` risk commands receive one recorded approval from `niyam-auto-approver`
+- one distinct human approver is still required for `HIGH`
+
+This makes long-running CLI use practical while keeping the central audit trail intact.
 
 ## High-Risk Dual Approval
 
@@ -154,14 +196,10 @@ If a remote developer's commands are not appearing:
 
 1. Check their base URL:
 ```bash
-node bin/niyam-cli.js status
+niyam-cli status
 ```
 2. Make sure it is not `127.0.0.1` unless they are on the server machine
 3. Make sure they logged in successfully
 4. Make sure their user is enabled in `Users`
 
-If commands are appearing as `niyam-agent` instead of the real user, that machine is still in agent-token mode. Run:
-
-```bash
-node bin/niyam-cli.js login --username <user> --password '<password>'
-```
+If commands are appearing as the right user but without the expected CLI label, that shell is probably using password-session login instead of a user-linked managed token.

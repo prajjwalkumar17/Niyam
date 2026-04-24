@@ -11,6 +11,7 @@ const Database = require('better-sqlite3');
 
 const { config, validateConfig } = require('./config');
 const { initializeDatabase } = require('./db/init');
+const { assertProductModeLock } = require('./db/runtime-settings');
 const { createAuth } = require('./auth');
 const { createCommandsRouter } = require('./api/commands');
 const { createApprovalsRouter } = require('./api/approvals');
@@ -19,7 +20,9 @@ const { createRulePacksRouter } = require('./api/rule-packs');
 const { createPolicyRouter } = require('./api/policy');
 const { createAuditRouter } = require('./api/audit');
 const { createCliRouter } = require('./api/cli');
+const { createMyApprovalPreferencesRouter } = require('./api/my-approval-preferences');
 const { createSignupRequestsRouter } = require('./api/signup-requests');
+const { createMyTokensRouter, createTokensRouter } = require('./api/tokens');
 const { createUsersRouter } = require('./api/users');
 const { buildWorkspaceRouter } = require('./api/workspace');
 const { broadcastManager, broadcast } = require('./ws/broadcast');
@@ -40,6 +43,7 @@ initializeDatabase();
 const db = new Database(config.DB_PATH);
 db.pragma('foreign_keys = ON');
 db.pragma('journal_mode = WAL');
+assertProductModeLock(db);
 
 // Create Express app
 const app = express();
@@ -140,15 +144,22 @@ app.get('/api/health', (req, res) => {
     res.json(stats);
 });
 
+app.get('/why-niyam', (_req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'why-niyam.html'));
+});
+
 // Authenticated API routes
 app.use('/api/commands', auth.requireAuth, createCommandsRouter(db, broadcast, { onApproved: queueExecution }));
 app.use('/api/approvals', auth.requireAuth, createApprovalsRouter(db, broadcast, { onApproved: queueExecution }));
 app.use('/api/policy', auth.requireAuth, createPolicyRouter(db));
 app.use('/api/cli', auth.requireAuth, createCliRouter(db, broadcast, auth, { onApproved: queueExecution }));
+app.use('/api/my/approval-preferences', auth.requireUserSession, createMyApprovalPreferencesRouter(db));
+app.use('/api/my/tokens', auth.requireUserSession, createMyTokensRouter(db));
 app.use('/api/workspace', auth.requireAuth, buildWorkspaceRouter(db));
 app.use('/api/rules', auth.requireAdmin, createRulesRouter(db, broadcast));
 app.use('/api/rule-packs', auth.requireAdmin, createRulePacksRouter(db));
 app.use('/api/audit', auth.requireAdmin, createAuditRouter(db));
+app.use('/api/tokens', auth.requireAdmin, createTokensRouter(db));
 app.use('/api/users', auth.requireAdmin, createUsersRouter(db));
 
 // Serve static dashboard
@@ -195,6 +206,24 @@ process.on('SIGINT', () => {
     process.exit(0);
 });
 
+const TERMINAL_COLORS = process.stdout.isTTY && !process.env.NO_COLOR
+    ? {
+        reset: '\u001b[0m',
+        bold: '\u001b[1m',
+        cyan: '\u001b[36m',
+        green: '\u001b[32m'
+    }
+    : {
+        reset: '',
+        bold: '',
+        cyan: '',
+        green: ''
+    };
+
+function paint(text, color) {
+    return `${color}${text}${TERMINAL_COLORS.reset}`;
+}
+
 // Start server
 server.listen(config.PORT, () => {
     logger.info('server_started', {
@@ -203,10 +232,10 @@ server.listen(config.PORT, () => {
         dataDir: config.DATA_DIR
     });
     console.log(`╔══════════════════════════════════════════╗`);
-    console.log(`║   Niyam - Command Governance System      ║`);
-    console.log(`║   Dashboard: http://localhost:${config.PORT}        ║`);
-    console.log(`║   API:        http://localhost:${config.PORT}/api   ║`);
-    console.log(`║   WebSocket:  ws://localhost:${config.PORT}/ws      ║`);
+    console.log(`║   ${paint('Niyam - Command Governance System', `${TERMINAL_COLORS.bold}${TERMINAL_COLORS.cyan}`)}      ║`);
+    console.log(`║   Dashboard: ${paint(`http://localhost:${config.PORT}`, TERMINAL_COLORS.green)}        ║`);
+    console.log(`║   API:        ${paint(`http://localhost:${config.PORT}/api`, TERMINAL_COLORS.green)}   ║`);
+    console.log(`║   WebSocket:  ${paint(`ws://localhost:${config.PORT}/ws`, TERMINAL_COLORS.green)}      ║`);
     console.log(`╚══════════════════════════════════════════╝`);
 });
 

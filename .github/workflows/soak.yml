@@ -1,0 +1,62 @@
+name: soak
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * 0'
+
+permissions:
+  contents: read
+
+jobs:
+  soak:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Start Niyam
+        run: |
+          mkdir -p "$RUNNER_TEMP/soak-data"
+          NIYAM_PORT=3451 \
+          NIYAM_ADMIN_PASSWORD=admin \
+          NIYAM_METRICS_TOKEN=soak-metrics \
+          NIYAM_DATA_DIR="$RUNNER_TEMP/soak-data" \
+          NIYAM_EXEC_DEFAULT_MODE=DIRECT \
+          NIYAM_EXEC_WRAPPER='["/usr/bin/env"]' \
+          NIYAM_EXEC_ALLOWED_ROOTS="$GITHUB_WORKSPACE" \
+          NIYAM_EXEC_DATA_KEY=soak-key \
+          node server.js >"$RUNNER_TEMP/soak-server.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/soak-server.pid"
+          for attempt in $(seq 1 40); do
+            if curl -sf "http://127.0.0.1:3451/api/health" >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/soak-server.log"
+          exit 1
+      - name: Run soak
+        run: |
+          NIYAM_BENCH_BASE_URL=http://127.0.0.1:3451 \
+          NIYAM_BENCH_ADMIN_USERNAME=admin \
+          NIYAM_BENCH_ADMIN_PASSWORD=admin \
+          NIYAM_SOAK_DURATION_SECONDS=120 \
+          NIYAM_SOAK_CONCURRENCY=4 \
+          npm run soak | tee "$RUNNER_TEMP/soak-output.json"
+      - name: Stop Niyam
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/soak-server.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/soak-server.pid")" 2>/dev/null || true
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: soak-artifacts
+          path: |
+            ${{ runner.temp }}/soak-server.log
+            ${{ runner.temp }}/soak-output.json

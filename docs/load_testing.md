@@ -26,11 +26,12 @@ At minimum:
 export NIYAM_BENCH_BASE_URL='http://127.0.0.1:3000'
 export NIYAM_BENCH_ADMIN_USERNAME='admin'
 export NIYAM_BENCH_ADMIN_PASSWORD='change-me'
-export NIYAM_BENCH_AGENT_TOKEN='dev-token'
 ```
 
 Optional:
 
+- `NIYAM_BENCH_MANAGED_TOKEN`
+  Use an existing managed token instead of letting the benchmark script create a temporary standalone token.
 - `NIYAM_SERVER_PID`
   Samples server RSS through `ps` and reports `maxRssKb`
 
@@ -79,4 +80,3 @@ For a release candidate or infra change:
 5. run `npm run soak`
 
 For local development, use lower counts and shorter durations.
-

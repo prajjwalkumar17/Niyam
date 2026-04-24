@@ -1,3 +1,4 @@
+const { config } = require('../config');
 const { logAudit } = require('../services/audit-log');
 const { createUsersService } = require('../services/users');
 const {
@@ -10,11 +11,21 @@ function createUsersRouter(db) {
     const router = require('express').Router();
     const users = createUsersService(db);
 
+    function rejectInIndividualMode(res) {
+        return res.status(403).json({ error: 'Local user management is unavailable in individual mode' });
+    }
+
     router.get('/', (_req, res) => {
+        if (config.PRODUCT_MODE === 'individual') {
+            return rejectInIndividualMode(res);
+        }
         res.json({ users: users.listUsers() });
     });
 
     router.post('/', (req, res) => {
+        if (config.PRODUCT_MODE === 'individual') {
+            return rejectInIndividualMode(res);
+        }
         const validation = validateUserPayload(req.body);
         if (!validation.valid) {
             return validationError(res, validation.errors);
@@ -39,6 +50,9 @@ function createUsersRouter(db) {
     });
 
     router.put('/:id', (req, res) => {
+        if (config.PRODUCT_MODE === 'individual') {
+            return rejectInIndividualMode(res);
+        }
         const validation = validateUserPayload(req.body, { partial: true });
         if (!validation.valid) {
             return validationError(res, validation.errors);
@@ -63,6 +77,9 @@ function createUsersRouter(db) {
     });
 
     router.post('/:id/password', (req, res) => {
+        if (config.PRODUCT_MODE === 'individual') {
+            return rejectInIndividualMode(res);
+        }
         const validation = validateUserPasswordPayload(req.body);
         if (!validation.valid) {
             return validationError(res, validation.errors);

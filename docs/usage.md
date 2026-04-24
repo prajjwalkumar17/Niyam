@@ -27,6 +27,22 @@ There can also be local team users:
 - developers and approvers with their own dashboard accounts
 - optional self-signup requests when team mode is enabled
 
+## Identity Modes
+
+### Individual Mode
+
+- humans still use the dashboard with the bootstrap `admin` session
+- local-user management and user-linked token flows are inactive while `individual` mode is enabled
+- CLI access uses standalone managed tokens
+- each token can represent a named CLI or agent identity such as `June` or `January`
+
+### Teams Mode
+
+- humans get local dashboard accounts
+- admins can create an initial CLI token for any user
+- each user can later create and block their own tokens from `Workspace > My CLI Tokens`
+- history and audit keep the effective user plus the token label, for example `alice via Cursor CLI`
+
 ## Main Flows
 
 ### 1. Submit A Command
@@ -62,6 +78,20 @@ For non-auto-approved commands:
 
 High-risk commands enforce stronger approval rules.
 
+### 2a. Approval Automation
+
+Niyam also supports a persisted auto-approval mode.
+
+- `LOW` risk stays policy auto-approved
+- `MEDIUM` risk can be fully auto-approved
+- `HIGH` risk can receive one synthetic approval from `niyam-auto-approver` and still wait for one distinct human approver
+
+Scope:
+
+- local users control their own setting from `Workspace`
+- user-linked tokens inherit the linked user's setting
+- standalone managed tokens are toggled by admins from `Users > Managed Tokens`
+
 ### 3. Execute
 
 Once approved, Niyam executes the command in:
@@ -79,6 +109,12 @@ Every step is recorded:
 - executed
 - failed
 - timed out
+- auto-approval preference changed
+
+Token lifecycle is also recorded:
+
+- token created
+- token blocked
 
 ## Dashboard Usage
 
@@ -95,9 +131,13 @@ Use it to:
 Use it to:
 
 - see the current signed-in identity
-- confirm whether team mode is enabled
+- confirm whether `individual` or `teams` mode is enabled
+- confirm whether the current access is a session or managed token
 - copy the current CLI wrapper install and removal commands
+- copy token login commands, and password login commands only in `teams` mode
+- inspect and toggle your own auto-approval mode when you are using a local user session in `teams` mode
 - inspect live instance details such as env file, allowed roots, and execution mode if you are an admin
+- manage your own CLI tokens when you are a local user session in `teams` mode
 
 ### Pending
 
@@ -137,15 +177,37 @@ Use it to:
 - export audit logs
 - inspect operational history
 - confirm where redaction occurred
+- see which CLI label or managed token was used when commands or approvals came from token auth
+- see when `niyam-auto-approver` approved a command or when a user changed auto-approval preference
 
-### Users
+### Users Or Tokens
 
 Use it to:
 
-- create local users directly
-- reset local passwords
-- grant `MEDIUM` and `HIGH` approval capability
+- create standalone token identities in `individual` mode from `Tokens`
+- create or block user-linked tokens as an admin in `teams` mode from `Users`
+- enable or disable auto approval for standalone tokens in `individual` mode
+- create local users directly in `teams` mode
+- reset local passwords in `teams` mode
+- grant `MEDIUM` and `HIGH` approval capability in `teams` mode
 - approve or reject signup requests when team mode is enabled
+
+## Token Lifecycle
+
+Managed tokens are now the preferred CLI auth path.
+
+Typical flow:
+
+1. Create a token in the dashboard
+2. Log a shell into it with `niyam-cli login --token '<token>'`
+3. Use that shell normally
+4. Block the token when that CLI, laptop, or workflow should stop submitting commands
+
+Important:
+
+- plaintext tokens are shown once
+- blocked tokens stop authenticating immediately
+- admin-only dashboard routes still require an admin session, even if a token belongs to an admin user
 
 ## API Usage
 
@@ -167,6 +229,22 @@ curl -b /tmp/niyam-cookies.txt \
   -H 'Content-Type: application/json' \
   -d "{\"command\":\"ls\",\"args\":[\"public\"],\"workingDir\":\"$PWD\"}" \
   http://127.0.0.1:3000/api/commands
+```
+
+### Create A Managed Token As Admin
+
+```bash
+curl -b /tmp/niyam-cookies.txt \
+  -H 'Content-Type: application/json' \
+  -d '{"label":"June","subjectType":"standalone","principalIdentifier":"June","principalDisplayName":"June"}' \
+  http://127.0.0.1:3000/api/tokens
+```
+
+### Check A Managed Token
+
+```bash
+curl -H 'Authorization: Bearer <managed-token>' \
+  http://127.0.0.1:3000/api/auth/me
 ```
 
 ### Simulate Before Submitting
@@ -269,8 +347,7 @@ const AgentClient = require('./agent/client');
 
 const client = new AgentClient({
   baseUrl: 'http://localhost:3000',
-  agentName: 'niyam-agent',
-  apiToken: 'dev-token'
+  apiToken: '<managed-token>'
 });
 
 async function main() {

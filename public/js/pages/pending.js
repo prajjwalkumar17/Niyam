@@ -62,12 +62,14 @@ async function loadPendingPage() {
                             <span class="status-badge pending">Pending</span>
                         </div>
                         <div class="command-stream-title"><code>${escapeHtml(buildCommandLineDisplay(cmd))}</code></div>
-                        <div class="command-stream-subtitle">${escapeHtml(cmd.requester)} · ${timeAgo(cmd.created_at)} · ${escapeHtml(formatApprovalProgress(cmd))}</div>
+                        <div class="command-stream-subtitle">${escapeHtml(describeActorWithAuth(cmd.requester, cmd.authenticationContext))} · ${timeAgo(cmd.created_at)} · ${escapeHtml(formatApprovalProgress(cmd))}</div>
                     </div>
                     <div class="command-stream-timer">${renderTimer(cmd.timeout_at, cmd.created_at, 'ring')}</div>
                 </div>
                 <div class="command-stream-meta-row">
                     <span class="command-stream-meta-pill">Requester · ${escapeHtml(cmd.requester)}</span>
+                    ${renderAuthenticationMetaPill(cmd.requester, cmd.authenticationContext)}
+                    ${renderApprovalAutomationMetaPill(cmd)}
                     <span class="command-stream-meta-pill">Approvals · ${escapeHtml(formatApprovalProgress(cmd))}</span>
                     <span class="command-stream-meta-pill">Approved By · ${escapeHtml((cmd.approvedBy || []).join(', ') || 'No approvals yet')}</span>
                     <span class="command-stream-meta-pill">Window · ${formatTimeout(cmd.timeout_at)}</span>

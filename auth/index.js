@@ -6,8 +6,33 @@ const {
     validatePasswordChangePayload,
     validationError
 } = require('../api/validation');
+const { createApprovalPreferencesService } = require('../services/approval-preferences');
 const { logAudit } = require('../services/audit-log');
+const { buildAuthenticationContext } = require('../services/auth-context');
+const { createTokensService } = require('../services/tokens');
 const { createUsersService } = require('../services/users');
+
+function parseMetadata(value) {
+    if (!value) {
+        return {};
+    }
+
+    try {
+        const parsed = JSON.parse(value);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch (error) {
+        return {};
+    }
+}
+
+function isBootstrapAdminUser(user) {
+    if (!user) {
+        return false;
+    }
+
+    const metadata = parseMetadata(user.metadata);
+    return user.username === config.ADMIN_USERNAME && Boolean(metadata.bootstrap);
+}
 
 function parseCookies(cookieHeader) {
     return String(cookieHeader || '')
@@ -45,6 +70,8 @@ function hashSessionToken(token) {
 
 function createAuth(db) {
     const usersService = createUsersService(db);
+    const tokensService = createTokensService(db);
+    const approvalPreferences = createApprovalPreferencesService(db);
     const insertSession = db.prepare(`
         INSERT INTO sessions (id, user_id, token_hash, identifier, roles, created_at, expires_at, last_seen_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -78,7 +105,7 @@ function createAuth(db) {
         return rawToken;
     }
 
-    function getSessionPrincipal(sessionToken) {
+    function getSessionAuthentication(sessionToken) {
         if (!sessionToken) {
             return null;
         }
@@ -105,43 +132,79 @@ function createAuth(db) {
             return null;
         }
 
+        if (config.PRODUCT_MODE === 'individual' && !isBootstrapAdminUser(user)) {
+            deleteSession.run(tokenHash);
+            return null;
+        }
+
         touchSession.run(new Date().toISOString(), tokenHash);
-        return usersService.buildUserPrincipal(user);
+        return {
+            principal: usersService.buildUserPrincipal(user),
+            authentication: {
+                mode: 'session',
+                credentialId: null,
+                credentialLabel: null,
+                subjectType: 'user'
+            }
+        };
     }
 
-    function getAgentPrincipal(authorizationHeader) {
+    function getManagedTokenAuthentication(authorizationHeader) {
         const token = String(authorizationHeader || '').replace(/^Bearer\s+/i, '').trim();
         if (!token) {
             return null;
         }
 
-        const match = Object.entries(config.AGENT_TOKENS).find(([, value]) => value === token);
-        if (!match) {
+        const authenticated = tokensService.authenticateManagedTokenDetailed(token);
+        if (!authenticated.ok) {
+            if (authenticated.error === 'blocked') {
+                return {
+                    principal: null,
+                    authentication: null,
+                    errorMessage: 'Managed token is blocked. Create a new token from the dashboard.'
+                };
+            }
+            return null;
+        }
+        const managedToken = authenticated.token;
+
+        if (config.PRODUCT_MODE === 'individual' && managedToken.subjectType !== 'standalone') {
             return null;
         }
 
-        return usersService.buildAgentPrincipal(match[0]);
+        return {
+            principal: tokensService.buildPrincipalFromManagedToken(managedToken),
+            authentication: {
+                mode: 'managed_token',
+                credentialId: managedToken.id,
+                credentialLabel: managedToken.label,
+                subjectType: managedToken.subjectType
+            }
+        };
     }
 
     function authenticateRequestHeaders(headers) {
-        const agentPrincipal = getAgentPrincipal(headers.authorization);
-        if (agentPrincipal) {
-            return agentPrincipal;
+        const managedToken = getManagedTokenAuthentication(headers.authorization);
+        if (managedToken && (managedToken.principal || managedToken.errorMessage)) {
+            return managedToken;
         }
 
         const cookies = parseCookies(headers.cookie);
-        return getSessionPrincipal(cookies[config.SESSION_COOKIE_NAME]);
+        return getSessionAuthentication(cookies[config.SESSION_COOKIE_NAME]);
     }
 
     function authMiddleware(req, _res, next) {
-        req.principal = authenticateRequestHeaders(req.headers);
+        const authenticated = authenticateRequestHeaders(req.headers);
+        req.principal = authenticated ? authenticated.principal : null;
+        req.authentication = authenticated ? buildAuthenticationContext(authenticated.authentication) : null;
+        req.authFailureMessage = authenticated ? authenticated.errorMessage || null : null;
         req.actor = req.principal ? req.principal.identifier : 'anonymous';
         next();
     }
 
     function requireAuth(req, res, next) {
         if (!req.principal) {
-            return res.status(401).json({ error: 'Authentication required' });
+            return res.status(401).json({ error: req.authFailureMessage || 'Authentication required' });
         }
 
         next();
@@ -149,11 +212,27 @@ function createAuth(db) {
 
     function requireAdmin(req, res, next) {
         if (!req.principal) {
-            return res.status(401).json({ error: 'Authentication required' });
+            return res.status(401).json({ error: req.authFailureMessage || 'Authentication required' });
+        }
+
+        if (!req.authentication || req.authentication.mode !== 'session') {
+            return res.status(403).json({ error: 'Admin session required' });
         }
 
         if (!req.principal.roles.includes('admin')) {
             return res.status(403).json({ error: 'Admin access required' });
+        }
+
+        next();
+    }
+
+    function requireUserSession(req, res, next) {
+        if (!req.principal) {
+            return res.status(401).json({ error: req.authFailureMessage || 'Authentication required' });
+        }
+
+        if (!req.authentication || req.authentication.mode !== 'session' || req.principal.type !== 'user') {
+            return res.status(403).json({ error: 'Local user session required' });
         }
 
         next();
@@ -185,7 +264,9 @@ function createAuth(db) {
 
         router.get('/config', (_req, res) => {
             res.json({
-                allowSelfSignup: config.ENABLE_SELF_SIGNUP
+                allowSelfSignup: config.ENABLE_SELF_SIGNUP,
+                productMode: config.PRODUCT_MODE,
+                profile: config.PROFILE
             });
         });
 
@@ -205,18 +286,32 @@ function createAuth(db) {
                 return res.status(statusCode).json({ error: message });
             }
 
+            if (config.PRODUCT_MODE === 'individual' && !isBootstrapAdminUser(authenticated.user)) {
+                return res.status(403).json({ error: 'Local user login is unavailable in individual mode' });
+            }
+
             issueSession(res, authenticated.user);
+            const principal = usersService.buildUserPrincipal(authenticated.user);
             res.json({
                 authenticated: true,
-                principal: usersService.buildUserPrincipal(authenticated.user)
+                principal,
+                authentication: {
+                    mode: 'session',
+                    credentialId: null,
+                    credentialLabel: null,
+                    subjectType: 'user'
+                },
+                approvalPreferences: approvalPreferences.resolveAutoApprovalPreference({
+                    principal,
+                    authentication: {
+                        mode: 'session',
+                        subjectType: 'user'
+                    }
+                })
             });
         });
 
-        router.post('/change-password', requireAuth, (req, res) => {
-            if (!req.principal || req.principal.type !== 'user') {
-                return res.status(403).json({ error: 'Only local users can change passwords' });
-            }
-
+        router.post('/change-password', requireUserSession, (req, res) => {
             const validation = validatePasswordChangePayload(req.body);
             if (!validation.valid) {
                 return validationError(res, validation.errors);
@@ -265,12 +360,17 @@ function createAuth(db) {
 
         router.get('/me', (req, res) => {
             if (!req.principal) {
-                return res.status(401).json({ error: 'Authentication required' });
+                return res.status(401).json({ error: req.authFailureMessage || 'Authentication required' });
             }
 
             res.json({
                 authenticated: true,
-                principal: req.principal
+                principal: req.principal,
+                authentication: req.authentication,
+                approvalPreferences: approvalPreferences.resolveAutoApprovalPreference({
+                    principal: req.principal,
+                    authentication: req.authentication
+                })
             });
         });
 
@@ -287,7 +387,8 @@ function createAuth(db) {
         cleanupExpiredSessions,
         createAuthRouter,
         requireAdmin,
-        requireAuth
+        requireAuth,
+        requireUserSession
     };
 }
 

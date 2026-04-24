@@ -14,7 +14,6 @@ At minimum:
 - SQLite database at `NIYAM_DB`
 - deployment secrets for:
   - `NIYAM_ADMIN_PASSWORD`
-  - `NIYAM_AGENT_TOKENS`
   - `NIYAM_EXEC_DATA_KEY`
   - `NIYAM_METRICS_TOKEN`
 

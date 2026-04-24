@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#081018">
+    <title>Why Niyam Exists | Command Control</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/niyam-mark.svg">
+    <script>document.documentElement.classList.add('js');</script>
+    <link rel="stylesheet" href="/css/why-niyam.css">
+</head>
+<body>
+    <div class="progress-rail" aria-hidden="true">
+        <div class="progress-bar" id="progress-bar"></div>
+    </div>
+
+    <main class="deck">
+        <section class="chapter hero" id="hero" data-section="hero">
+            <div class="hero-copy reveal stagger">
+                <h1>The shell was never supposed to be an honor system.</h1>
+                <p class="lead">
+                    Agents and shells can do production damage in one paste. Most teams still rely on convention,
+                    shared credentials, and after-the-fact blame.
+                </p>
+                <p class="aside">Valid command. Invalid control model.</p>
+                <div class="hero-points">
+                    <span>Simulate first</span>
+                    <span>Approve when needed</span>
+                    <span>Audit with identity</span>
+                </div>
+            </div>
+            <div class="hero-visual reveal">
+                <div class="terminal-stack" aria-label="Illustrative operator terminal">
+                    <div class="terminal-card terminal-card-primary">
+                        <div class="terminal-top">
+                            <span class="terminal-dot"></span>
+                            <span class="terminal-dot"></span>
+                            <span class="terminal-dot"></span>
+                            <span class="terminal-title">operator-shell.zsh</span>
+                        </div>
+                        <div class="terminal-body">
+                            <div class="terminal-line prompt">$ kubectl delete job cleanup --all-namespaces --context prod-eu</div>
+                            <div class="terminal-line quiet">context sync: prod-us, prod-eu, prod-apac</div>
+                            <div class="terminal-line warning">deleting resources across 3 clusters</div>
+                            <div class="terminal-line error">post-incident note: "we assumed the context was local"</div>
+                        </div>
+                    </div>
+                    <div class="terminal-card terminal-card-secondary">
+                        <div class="terminal-top">
+                            <span class="terminal-dot"></span>
+                            <span class="terminal-dot"></span>
+                            <span class="terminal-dot"></span>
+                            <span class="terminal-title">agent-dispatch.log</span>
+                        </div>
+                        <div class="terminal-body">
+                            <div class="terminal-line prompt">$ gh workflow run release.yml --ref main</div>
+                            <div class="terminal-line quiet">auth: shared token</div>
+                            <div class="terminal-line quiet">requester: whichever identity the dashboard token represents</div>
+                            <div class="terminal-line warning">approval: inferred from vibes</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <a class="next-link" href="#failures">Watch the failure happen</a>
+        </section>
+
+        <section class="chapter failures" id="failures" data-section="failures">
+            <div class="chapter-heading reveal">
+                <h2>One kubectl line. Real blast radius.</h2>
+                <p>This is the problem Niyam exists to interrupt.</p>
+            </div>
+
+            <article class="incident-film reveal">
+                <div class="incident-stage" aria-label="Animated kubectl incident reel" data-incident-stage>
+                    <div class="incident-stage-topline">
+                        <span>incident reel · cleanup-shell.zsh</span>
+                        <span class="incident-stage-status" data-incident-status>operator thinks: one cluster</span>
+                    </div>
+                    <div class="incident-viewport">
+                        <div class="incident-grid" aria-hidden="true"></div>
+
+                        <div class="incident-terminal">
+                            <div class="incident-terminal-top">
+                                <span class="terminal-dot"></span>
+                                <span class="terminal-dot"></span>
+                                <span class="terminal-dot"></span>
+                                <span class="incident-terminal-title">cleanup-shell.zsh</span>
+                                <span class="incident-context-chip" data-incident-context>context: prod-eu</span>
+                            </div>
+                            <div class="incident-terminal-body">
+                                <div class="incident-line quiet">ticket: remove legacy pods after deploy</div>
+                                <div class="incident-line prompt"><span class="incident-command-text" data-incident-command>$ kubectl delete pods -l app=legacy --all-namespaces --context prod-eu</span></div>
+                                <div class="incident-line dim">policy preview: unavailable</div>
+                                <div class="incident-line alert">scope fan-out detected across prod-us, prod-eu, prod-apac</div>
+                            </div>
+                        </div>
+
+                        <div class="incident-cluster-lane">
+                            <div class="incident-cluster cluster-us" data-cluster="us">
+                                <span class="incident-cluster-tag">prod-us</span>
+                                <span class="incident-cluster-core"></span>
+                                <span class="incident-cluster-ring"></span>
+                                <span class="incident-cluster-cross"></span>
+                            </div>
+                            <div class="incident-cluster cluster-eu" data-cluster="eu">
+                                <span class="incident-cluster-tag">prod-eu</span>
+                                <span class="incident-cluster-core"></span>
+                                <span class="incident-cluster-ring"></span>
+                                <span class="incident-cluster-cross"></span>
+                            </div>
+                            <div class="incident-cluster cluster-apac" data-cluster="apac">
+                                <span class="incident-cluster-tag">prod-apac</span>
+                                <span class="incident-cluster-core"></span>
+                                <span class="incident-cluster-ring"></span>
+                                <span class="incident-cluster-cross"></span>
+                            </div>
+                        </div>
+
+                        <div class="incident-warning-card" data-incident-warning>
+                            <span class="incident-warning-kicker" data-incident-warning-kicker>what the operator meant</span>
+                            <strong data-incident-warning-title>clean one cluster</strong>
+                            <span data-incident-warning-body>what the shell executed: a region-wide delete path</span>
+                        </div>
+
+                        <div class="incident-stage-footer">
+                            <span data-incident-footer-left>approval window: skipped</span>
+                            <span data-incident-footer-right>audit certainty: post-incident only</span>
+                        </div>
+                    </div>
+                </div>
+            </article>
+        </section>
+
+        <section class="chapter diagnosis" id="diagnosis" data-section="diagnosis">
+            <div class="chapter-heading reveal">
+                <h2>The problem is structural.</h2>
+                <p>Fast shells. Shared identity. No hard stop before impact.</p>
+            </div>
+
+            <div class="diagnosis-grid">
+                <article class="diagnosis-card reveal">
+                    <h3>Shells optimize for speed</h3>
+                    <p>They do not pause for risk.</p>
+                </article>
+                <article class="diagnosis-card reveal">
+                    <h3>Shared tokens erase ownership</h3>
+                    <p>Everyone can act. No one is clearly accountable.</p>
+                </article>
+                <article class="diagnosis-card reveal">
+                    <h3>Chat approval is not control</h3>
+                    <p>If the shell can still run, the system did not actually stop anything.</p>
+                </article>
+            </div>
+        </section>
+
+        <section class="chapter chain" id="chain" data-section="chain">
+            <div class="chapter-heading reveal">
+                <h2>Niyam inserts the missing stop.</h2>
+                <p>Before the shell can do damage, Niyam turns the command into a governed decision.</p>
+            </div>
+
+            <div class="chain-layout">
+                <div class="chain-flow reveal">
+                    <div class="flow-step">
+                        <span class="step-index">01</span>
+                        <div>
+                            <h3>Policy simulation</h3>
+                            <p>See the risk before execution.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <span class="step-index">02</span>
+                        <div>
+                            <h3>Risk and mode assigned</h3>
+                            <p><code>LOW</code>, <code>MEDIUM</code>, or <code>HIGH</code>. <code>DIRECT</code> or <code>WRAPPER</code>.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <span class="step-index">03</span>
+                        <div>
+                            <h3>Approval if required</h3>
+                            <p>High-risk commands stop until someone explicitly allows them.</p>
+                        </div>
+                    </div>
+                    <div class="flow-step">
+                        <span class="step-index">04</span>
+                        <div>
+                            <h3>Execution and audit</h3>
+                            <p>Execution stays attributable, reviewable, and durable.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="policy-panel reveal">
+                    <div class="policy-shell">
+                        <div class="policy-row">
+                            <span class="policy-key">command</span>
+                            <span class="policy-value">gh workflow run release.yml</span>
+                        </div>
+                        <div class="policy-row">
+                            <span class="policy-key">riskLevel</span>
+                            <span class="policy-value risk-high">HIGH</span>
+                        </div>
+                        <div class="policy-row">
+                            <span class="policy-key">executionMode</span>
+                            <span class="policy-value">WRAPPER</span>
+                        </div>
+                        <div class="policy-row">
+                            <span class="policy-key">approvalThreshold</span>
+                            <span class="policy-value">2 distinct approvers</span>
+                        </div>
+                        <div class="policy-row">
+                            <span class="policy-key">identity</span>
+                            <span class="policy-value">specific CLI / token</span>
+                        </div>
+                    </div>
+                    <p class="policy-note">The shell should not be guessing. Niyam answers first.</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="chapter proof" id="proof" data-section="proof">
+            <div class="chapter-heading reveal">
+                <h2>Bad commands stop feeling routine.</h2>
+            </div>
+
+            <div class="proof-grid">
+                <article class="proof-card reveal">
+                    <h3>The command pauses before impact.</h3>
+                    <p>Risky commands stop instead of rushing through.</p>
+                </article>
+                <article class="proof-card reveal">
+                    <h3>High-risk traffic can be forced into wrapper execution.</h3>
+                    <p>Dangerous paths stop being “just another shell command.”</p>
+                </article>
+                <article class="proof-card reveal">
+                    <h3>Every CLI can have its own actor.</h3>
+                    <p>No more “someone used the shared token.”</p>
+                </article>
+            </div>
+        </section>
+
+        <section class="chapter modes" id="modes" data-section="modes">
+            <div class="chapter-heading reveal">
+                <h2>Not every toolchain should share one skeleton key.</h2>
+                <p>Split identities by person, by CLI, or by agent.</p>
+            </div>
+
+            <div class="mode-columns">
+                <article class="mode-panel reveal">
+                    <h3>One named token per CLI.</h3>
+                    <p>June is June. January is January.</p>
+                    <ul>
+                        <li>Clean separation</li>
+                        <li>Clean revocation</li>
+                    </ul>
+                </article>
+
+                <article class="mode-panel reveal">
+                    <h3>Real users plus CLI-specific tokens.</h3>
+                    <p>History can say <code>alice via Cursor CLI</code>.</p>
+                    <ul>
+                        <li>Clear responsibility</li>
+                        <li>Token-level revocation</li>
+                    </ul>
+                </article>
+            </div>
+        </section>
+
+        <section class="chapter hook" id="hook" data-section="hook">
+            <div class="hook-shell reveal">
+                <div class="chapter-heading">
+                    <h2>This is the zsh hook that intercepts every command.</h2>
+                </div>
+                <div class="hook-frame">
+                    <div class="hook-frame-top">
+                        <span class="terminal-dot"></span>
+                        <span class="terminal-dot"></span>
+                        <span class="terminal-dot"></span>
+                        <span class="hook-title">~/.zshrc · interception hook</span>
+                    </div>
+                    <pre class="hook-code"><code># abridged from the current ~/.zshrc
+[[ -o interactive ]] || return 0
+export NIYAM_CLI_BIN='/Users/prajjwal.kumar/Projects/Niyam/bin/niyam-cli.js'
+export NIYAM_INTERCEPT_SESSION_ID="${NIYAM_INTERCEPT_SESSION_ID:-${HOST:-shell}-$$}"
+
+__niyam_zsh_run_local() {
+  local raw="$1"
+  local dispatch_id="$2"
+  eval "$raw"
+  local rc=$?
+  if [[ -n "$dispatch_id" ]]; then
+    NIYAM_INTERCEPT_ACTIVE=1 command "$NIYAM_CLI_BIN" report-local-result ...
+  fi
+  return $rc
+}
+
+__niyam_accept_line() {
+  emulate -L zsh
+  local raw="$BUFFER"
+  local trimmed="${raw#"${raw%%[![:space:]]*}"}"
+  local first_token="${${(z)raw}[1]}"
+
+  if [[ "${trimmed[1]}" == "#" || "$first_token" == "niyam-cli" || "$first_token" == "niyam-on" || "$first_token" == "niyam-off" || "$first_token" == "$NIYAM_CLI_BIN" ]]; then
+    eval "$raw"        # don't intercept Niyam's own commands
+    return $?
+  fi
+
+  local local_file="${TMPDIR:-/tmp}/niyam-dispatch.$$.$RANDOM"
+  NIYAM_INTERCEPT_ACTIVE=1 command "$NIYAM_CLI_BIN" dispatch \
+    --command "$raw" \
+    --shell zsh \
+    --session-id "$NIYAM_INTERCEPT_SESSION_ID" \
+    --working-dir "$PWD" \
+    --local-output-file "$local_file"
+  local rc=$?
+  local local_result="$(&lt;"$local_file")"
+
+  case "$rc" in
+    85)
+      local dispatch_id="${local_result#dispatch_id=}"
+      __niyam_zsh_run_local "$raw" "$dispatch_id"
+      rc=$?
+      __niyam_zsh_safe_finish
+      return $rc
+      ;;
+    86)
+      eval "${local_result#local_command=}"   # one-shot bypass path
+      return $?
+      ;;
+    *)
+      return "$rc"
+      ;;
+  esac
+}
+
+zle -N accept-line __niyam_accept_line
+</code></pre>
+                </div>
+            </div>
+        </section>
+
+        <section class="chapter close" id="close" data-section="close">
+            <div class="close-shell reveal">
+                <h2>You can keep trusting vibes.</h2>
+                <p>
+                    Or you can put one real control layer between a command and production.
+                </p>
+                <p class="closing-line">Niyam is the layer between intention and impact.</p>
+                <div class="cta-block">
+                    <div class="cta-primary">Run Niyam before the next routine command becomes the incident.</div>
+                    <pre class="cta-code"><code>npm install
+NIYAM_ADMIN_PASSWORD=change-me NIYAM_EXEC_DATA_KEY=local-dev-key npm start</code></pre>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script src="/js/why-niyam.js"></script>
+</body>
+</html>

@@ -256,6 +256,42 @@ function validateCliDispatchCompletionPayload(body) {
     };
 }
 
+function validateCliShellLaunchPayload(body) {
+    const value = isPlainObject(body) ? body : {};
+    const errors = [];
+    const normalized = {};
+
+    const token = typeof value.token === 'string' ? value.token.trim() : '';
+    if (!token) {
+        errors.push('Token is required');
+    } else if (token.length > 4096) {
+        errors.push('Token is too long');
+    } else {
+        normalized.token = token;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(value, 'shell')) {
+        if (typeof value.shell !== 'string') {
+            errors.push('Shell must be a string');
+        } else {
+            const shell = value.shell.trim().toLowerCase();
+            if (!['bash', 'zsh'].includes(shell)) {
+                errors.push('Shell must be zsh or bash');
+            } else {
+                normalized.shell = shell;
+            }
+        }
+    } else {
+        normalized.shell = null;
+    }
+
+    return {
+        valid: errors.length === 0,
+        errors,
+        value: normalized
+    };
+}
+
 function validateRulePayload(body, options = {}) {
     const value = isPlainObject(body) ? body : {};
     const errors = [];
@@ -464,6 +500,76 @@ function validatePasswordChangePayload(body) {
     };
 }
 
+function validateManagedTokenPayload(body, options = {}) {
+    const value = isPlainObject(body) ? body : {};
+    const errors = [];
+    const normalized = {};
+
+    validateOptionalString(value, 'label', normalized, errors, { required: true, maxLength: 128 });
+
+    if (options.userSelfService) {
+        normalized.subjectType = 'user';
+        return {
+            valid: errors.length === 0,
+            errors,
+            value: normalized
+        };
+    }
+
+    const subjectType = typeof value.subjectType === 'string' ? value.subjectType.trim().toLowerCase() : '';
+    if (!['standalone', 'user'].includes(subjectType)) {
+        errors.push('Subject type must be standalone or user');
+    } else {
+        normalized.subjectType = subjectType;
+    }
+
+    if (subjectType === 'standalone') {
+        validateOptionalString(value, 'principalIdentifier', normalized, errors, { required: true, maxLength: 128 });
+        if (Object.prototype.hasOwnProperty.call(value, 'principalDisplayName')) {
+            validateOptionalString(value, 'principalDisplayName', normalized, errors, { required: false, maxLength: 128 });
+        } else {
+            normalized.principalDisplayName = null;
+        }
+    } else if (subjectType === 'user') {
+        validateOptionalString(value, 'userId', normalized, errors, { required: true, maxLength: 128 });
+    }
+
+    return {
+        valid: errors.length === 0,
+        errors,
+        value: normalized
+    };
+}
+
+function validateAutoApprovalPreferencePayload(body) {
+    const value = isPlainObject(body) ? body : {};
+    const errors = [];
+    const normalized = {};
+    const mode = typeof value.autoApprovalMode === 'string' ? value.autoApprovalMode.trim().toLowerCase() : '';
+    if (mode) {
+        if (!['off', 'normal', 'all'].includes(mode)) {
+            errors.push('Auto approval mode must be off, normal, or all');
+        } else {
+            normalized.autoApprovalMode = mode;
+            normalized.autoApprovalEnabled = mode !== 'off';
+        }
+    } else {
+        const enabled = normalizeBooleanLike(value.autoApprovalEnabled);
+        if (enabled === null) {
+            errors.push('Auto approval mode is required');
+        } else {
+            normalized.autoApprovalEnabled = enabled;
+            normalized.autoApprovalMode = enabled ? 'normal' : 'off';
+        }
+    }
+
+    return {
+        valid: errors.length === 0,
+        errors,
+        value: normalized
+    };
+}
+
 function validatePackActionBody(body) {
     const value = isPlainObject(body) ? body : {};
     const mode = value.mode === undefined ? 'install_if_missing' : value.mode;
@@ -543,9 +649,12 @@ module.exports = {
     validationError,
     validateApprovalPayload,
     validateCliDispatchCompletionPayload,
+    validateCliShellLaunchPayload,
     validateCliDispatchPayload,
     validateCommandPayload,
     validateLoginBody,
+    validateManagedTokenPayload,
+    validateAutoApprovalPreferencePayload,
     validatePasswordChangePayload,
     validatePackActionBody,
     validateRulePayload,

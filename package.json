@@ -9,7 +9,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "test": "node --test",
+    "test": "node --test tests/e2e.test.js tests/cli-shell-launcher.test.js tests/deploy-scripts.test.js tests/oneclick.test.js",
+    "test:perf": "node --test tests/perf.test.js",
     "init-db": "node db/init.js",
     "setup:interactive": "bash ./oneclick-setup.sh",
     "start:guided": "bash ./oneclick-setup.sh",
@@ -26,13 +27,24 @@
     "soak": "node scripts/soak.js",
     "install:render": "sh scripts/install.sh render",
     "install:stage": "sh scripts/install.sh install",
-    "package:selfhost": "sh scripts/package.sh"
+    "package:selfhost": "sh scripts/package.sh",
+    "verify": "npm run verify:core",
+    "verify:core": "npm run verify:shell && npm test && npm run smoke && npm run smoke:wrapper",
+    "verify:shell": "bash scripts/check_shell.sh",
+    "verify:browser": "playwright test",
+    "verify:deploy": "node --test tests/deploy-scripts.test.js",
+    "verify:oneclick": "node --test tests/oneclick.test.js",
+    "verify:docker": "bash scripts/docker_smoke.sh",
+    "verify:extended": "npm run verify:core && npm run verify:browser && npm run verify:deploy && npm run verify:oneclick && npm run test:perf && npm run verify:docker"
   },
   "dependencies": {
     "better-sqlite3": "^12.9.0",
     "express": "^4.18.2",
     "uuid": "^9.0.1",
     "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.54.2"
   },
   "engines": {
     "node": ">=18.0.0"

@@ -12,6 +12,7 @@ const {
     parseSimpleCommand,
     tokenizeCommand
 } = require('../lib/command-line');
+const { addAuthDetails, buildAuthenticationContext, toAuthColumns } = require('./auth-context');
 const { logAudit } = require('./audit-log');
 const { persistCommandSubmission, prepareCommandSubmission } = require('./command-submissions');
 const { shapeCliDispatchRecord } = require('./record-shaping');
@@ -25,7 +26,7 @@ function createCliDispatchService(db, options = {}) {
     const broadcast = options.broadcast;
     const onApproved = options.onApproved;
 
-    function createDispatch(payload, principal) {
+    function createDispatch(payload, principal, authentication) {
         const rawCommand = String(payload.rawCommand || '').trim();
         if (isBlankCommand(rawCommand) || isCommentOnlyCommand(rawCommand)) {
             return {
@@ -84,20 +85,25 @@ function createCliDispatchService(db, options = {}) {
         const dispatchId = uuidv4();
         const now = new Date().toISOString();
         const redactionSummary = buildRedactionSummary(redactedInput.summary);
+        const authColumns = toAuthColumns(authentication);
+        const authenticationContext = buildAuthenticationContext(authentication);
 
         db.prepare(`
             INSERT INTO cli_dispatches (
-                id, command, requester, requester_type, metadata, exec_command, working_dir,
+                id, command, requester, requester_type, auth_mode, auth_credential_id, auth_credential_label, metadata, exec_command, working_dir,
                 shell, session_id, first_token, first_token_type, has_shell_syntax,
                 interactive_hint, route, reason, passthrough_reason, risk_level,
                 execution_mode, status, command_id, local_exit_code, local_signal,
                 duration_ms, completed_at, redaction_summary, redacted, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
             dispatchId,
             redactedInput.command,
             principal.identifier,
             principal.type,
+            authColumns.authMode,
+            authColumns.authCredentialId,
+            authColumns.authCredentialLabel,
             JSON.stringify(redactedInput.metadata || {}),
             encryptJson(rawCommand, config.EXEC_DATA_KEY),
             workingDir,
@@ -125,25 +131,30 @@ function createCliDispatchService(db, options = {}) {
         );
 
         logAudit(db, 'cli_dispatch_created', 'cli_dispatch', dispatchId, principal.identifier, {
-            command: redactedInput.command,
-            route: routeResult.route,
-            riskLevel: simulation.riskLevel,
-            executionMode: simulation.executionMode,
-            shell: payload.shell || 'unknown'
+            ...addAuthDetails({
+                command: redactedInput.command,
+                route: routeResult.route,
+                riskLevel: simulation.riskLevel,
+                executionMode: simulation.executionMode,
+                shell: payload.shell || 'unknown'
+            }, authentication)
         });
         if (broadcast) {
             broadcast('cli_dispatch_created', {
                 id: dispatchId,
                 route: routeResult.route,
-                riskLevel: simulation.riskLevel
+                riskLevel: simulation.riskLevel,
+                authenticationContext
             });
         }
 
         if (routeResult.route === 'BLOCKED') {
             logAudit(db, 'cli_dispatch_blocked', 'cli_dispatch', dispatchId, principal.identifier, {
-                command: redactedInput.command,
-                reason: routeResult.reason,
-                riskLevel: simulation.riskLevel
+                ...addAuthDetails({
+                    command: redactedInput.command,
+                    reason: routeResult.reason,
+                    riskLevel: simulation.riskLevel
+                }, authentication)
             });
 
             return {
@@ -154,7 +165,8 @@ function createCliDispatchService(db, options = {}) {
                     reason: routeResult.reason,
                     simulation,
                     redactionSummary,
-                    commandId: null
+                    commandId: null,
+                    authenticationContext
                 })
             };
         }
@@ -174,9 +186,11 @@ function createCliDispatchService(db, options = {}) {
                 `).run(prepared.evaluation.reason, new Date().toISOString(), dispatchId);
 
                 logAudit(db, 'cli_dispatch_blocked', 'cli_dispatch', dispatchId, principal.identifier, {
-                    command: redactedInput.command,
-                    reason: prepared.evaluation.reason,
-                    riskLevel: prepared.evaluation.riskLevel
+                    ...addAuthDetails({
+                        command: redactedInput.command,
+                        reason: prepared.evaluation.reason,
+                        riskLevel: prepared.evaluation.riskLevel
+                    }, authentication)
                 });
 
                 return {
@@ -187,7 +201,8 @@ function createCliDispatchService(db, options = {}) {
                         reason: prepared.evaluation.reason,
                         simulation,
                         redactionSummary,
-                        commandId: null
+                        commandId: null,
+                        authenticationContext
                     })
                 };
             }
@@ -196,6 +211,7 @@ function createCliDispatchService(db, options = {}) {
                 db,
                 broadcast,
                 onApproved,
+                principal,
                 requester: principal.identifier,
                 requesterType: principal.type,
                 command: parsedCommand.command,
@@ -204,7 +220,8 @@ function createCliDispatchService(db, options = {}) {
                 timeoutHours: null,
                 workingDir,
                 evaluation: prepared.evaluation,
-                redactedInput: prepared.redactedInput
+                redactedInput: prepared.redactedInput,
+                authentication
             });
 
             db.prepare(`
@@ -214,14 +231,17 @@ function createCliDispatchService(db, options = {}) {
             `).run(commandData.id, new Date().toISOString(), dispatchId);
 
             logAudit(db, 'cli_dispatch_linked_command', 'cli_dispatch', dispatchId, principal.identifier, {
-                commandId: commandData.id,
-                route: 'REMOTE_EXEC',
-                riskLevel: commandData.riskLevel
+                ...addAuthDetails({
+                    commandId: commandData.id,
+                    route: 'REMOTE_EXEC',
+                    riskLevel: commandData.riskLevel
+                }, authentication)
             });
             if (broadcast) {
                 broadcast('cli_dispatch_linked_command', {
                     id: dispatchId,
-                    commandId: commandData.id
+                    commandId: commandData.id,
+                    authenticationContext
                 });
             }
 
@@ -233,7 +253,8 @@ function createCliDispatchService(db, options = {}) {
                     reason: routeResult.reason,
                     simulation,
                     redactionSummary,
-                    commandId: commandData.id
+                    commandId: commandData.id,
+                    authenticationContext
                 })
             };
         }
@@ -246,18 +267,19 @@ function createCliDispatchService(db, options = {}) {
                 reason: routeResult.reason,
                 simulation,
                 redactionSummary,
-                commandId: null
+                commandId: null,
+                authenticationContext
             })
         };
     }
 
-    function completeDispatch(dispatchId, payload, principal) {
+    function completeDispatch(dispatchId, payload, principal, authentication) {
         const row = db.prepare('SELECT * FROM cli_dispatches WHERE id = ?').get(dispatchId);
         if (!row) {
             return { statusCode: 404, body: { error: 'CLI dispatch not found' } };
         }
 
-        if (!canAccessDispatch(row, principal)) {
+        if (!canAccessDispatch(row, principal, authentication)) {
             return { statusCode: 403, body: { error: 'Not authorized for this CLI dispatch' } };
         }
 
@@ -285,15 +307,18 @@ function createCliDispatchService(db, options = {}) {
         );
 
         logAudit(db, nextStatus === 'local_completed' ? 'cli_dispatch_local_completed' : 'cli_dispatch_local_failed', 'cli_dispatch', dispatchId, principal.identifier, {
-            exitCode: payload.exitCode,
-            durationMs: payload.durationMs,
-            signal: payload.signal || null
+            ...addAuthDetails({
+                exitCode: payload.exitCode,
+                durationMs: payload.durationMs,
+                signal: payload.signal || null
+            }, authentication || buildAuthenticationContext(row))
         });
         if (broadcast) {
             broadcast('cli_dispatch_updated', {
                 id: dispatchId,
                 status: nextStatus,
-                localExitCode: payload.exitCode
+                localExitCode: payload.exitCode,
+                authenticationContext: buildAuthenticationContext(row)
             });
         }
 
@@ -406,7 +431,7 @@ function determineDispatchRoute(options) {
     };
 }
 
-function buildDispatchResponse({ dispatchId, route, reason, simulation, redactionSummary, commandId }) {
+function buildDispatchResponse({ dispatchId, route, reason, simulation, redactionSummary, commandId, authenticationContext }) {
     return {
         dispatchId,
         route,
@@ -416,7 +441,8 @@ function buildDispatchResponse({ dispatchId, route, reason, simulation, redactio
         threshold: simulation.threshold,
         matchedRules: simulation.matchedRules,
         commandId,
-        redactionSummary
+        redactionSummary,
+        authenticationContext
     };
 }
 
@@ -435,12 +461,12 @@ function mapPassthroughReason(firstTokenType) {
     return 'unknown';
 }
 
-function canAccessDispatch(row, principal) {
+function canAccessDispatch(row, principal, authentication) {
     if (!principal) {
         return false;
     }
 
-    if (Array.isArray(principal.roles) && principal.roles.includes('admin')) {
+    if (authentication && authentication.mode === 'session' && Array.isArray(principal.roles) && principal.roles.includes('admin')) {
         return true;
     }
 

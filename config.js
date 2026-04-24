@@ -63,24 +63,15 @@ function parseJsonArrayEnv(value) {
     throw new Error('Expected a JSON array');
 }
 
-function parseAgentTokens() {
-    if (process.env.NIYAM_AGENT_TOKENS) {
-        try {
-            const parsed = JSON.parse(process.env.NIYAM_AGENT_TOKENS);
-            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-                return parsed;
-            }
-        } catch (error) {
-            throw new Error('NIYAM_AGENT_TOKENS must be a JSON object of identifier -> token');
-        }
+function parseProductMode() {
+    const raw = process.env.NIYAM_PRODUCT_MODE;
+    if (raw) {
+        return String(raw).trim().toLowerCase();
     }
 
-    if (process.env.NIYAM_AGENT_TOKEN) {
-        const identifier = process.env.NIYAM_AGENT_IDENTIFIER || 'niyam-agent';
-        return { [identifier]: process.env.NIYAM_AGENT_TOKEN };
-    }
-
-    return {};
+    return parseBooleanEnv(process.env.NIYAM_ENABLE_SELF_SIGNUP, false)
+        ? 'teams'
+        : 'individual';
 }
 
 function parseExecWrapper() {
@@ -125,6 +116,7 @@ const config = {
     ADMIN_USERNAME: process.env.NIYAM_ADMIN_USERNAME || 'admin',
     ADMIN_IDENTIFIER: process.env.NIYAM_ADMIN_IDENTIFIER || 'admin',
     ADMIN_PASSWORD: process.env.NIYAM_ADMIN_PASSWORD || (IS_PRODUCTION ? '' : 'admin'),
+    PRODUCT_MODE: parseProductMode(),
     ENABLE_SELF_SIGNUP: parseBooleanEnv(process.env.NIYAM_ENABLE_SELF_SIGNUP, false),
     SESSION_COOKIE_NAME: 'niyam_session',
     SESSION_TTL_MS: parseFloatEnv(process.env.NIYAM_SESSION_TTL_HOURS, 12) * 60 * 60 * 1000,
@@ -132,7 +124,6 @@ const config = {
     LOG_LEVEL: process.env.NIYAM_LOG_LEVEL || 'info',
     METRICS_TOKEN: process.env.NIYAM_METRICS_TOKEN || '',
     ALLOWED_ORIGINS: parseList(process.env.NIYAM_ALLOWED_ORIGINS),
-    AGENT_TOKENS: parseAgentTokens(),
     ALERT_WEBHOOK_URL: process.env.NIYAM_ALERT_WEBHOOK_URL || '',
     ALERT_MIN_SEVERITY: process.env.NIYAM_ALERT_MIN_SEVERITY || 'error',
     ALERT_EVENTS: parseList(process.env.NIYAM_ALERT_EVENTS),
@@ -175,6 +166,14 @@ const config = {
 function validateConfig() {
     if (config.IS_PRODUCTION && !config.ADMIN_PASSWORD) {
         throw new Error('NIYAM_ADMIN_PASSWORD is required when NODE_ENV=production');
+    }
+
+    if (!['individual', 'teams'].includes(config.PRODUCT_MODE)) {
+        throw new Error('NIYAM_PRODUCT_MODE must be "individual" or "teams"');
+    }
+
+    if (config.PRODUCT_MODE === 'individual' && config.ENABLE_SELF_SIGNUP) {
+        throw new Error('NIYAM_ENABLE_SELF_SIGNUP cannot be enabled when NIYAM_PRODUCT_MODE=individual');
     }
 
     if (!['DIRECT', 'WRAPPER'].includes(config.EXEC_DEFAULT_MODE)) {
