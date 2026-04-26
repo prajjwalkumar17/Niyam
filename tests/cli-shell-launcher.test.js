@@ -209,7 +209,9 @@ test('NIYAM_CLI_CONFIG_PATH scopes CLI auth changes to the isolated shell config
     }
 });
 
-test('zsh bootstrap keeps the isolated config alive for the current session and removes it on shell exit', () => {
+const zshBootstrapTest = commandExists('zsh') ? test : test.skip;
+
+zshBootstrapTest('zsh bootstrap keeps the isolated config alive for the current session and removes it on shell exit', () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'niyam-zsh-bootstrap-home-'));
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'niyam-zsh-bootstrap-'));
     const configPath = path.join(tempDir, 'config.json');
@@ -219,11 +221,6 @@ test('zsh bootstrap keeps the isolated config alive for the current session and 
     const originalConfigPath = process.env.NIYAM_CLI_CONFIG_PATH;
 
     try {
-        if (!commandExists('zsh')) {
-            test.skip('zsh is not installed in this environment');
-            return;
-        }
-
         process.env.HOME = tempHome;
         process.env.XDG_CONFIG_HOME = path.join(tempHome, '.config');
         delete process.env.NIYAM_CLI_CONFIG_PATH;
