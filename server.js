@@ -144,10 +144,6 @@ app.get('/api/health', (req, res) => {
     res.json(stats);
 });
 
-app.get('/why-niyam', (_req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'why-niyam.html'));
-});
-
 // Authenticated API routes
 app.use('/api/commands', auth.requireAuth, createCommandsRouter(db, broadcast, { onApproved: queueExecution }));
 app.use('/api/approvals', auth.requireAuth, createApprovalsRouter(db, broadcast, { onApproved: queueExecution }));

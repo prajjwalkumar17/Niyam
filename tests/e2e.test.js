@@ -214,27 +214,14 @@ test('unknown api routes return a 404 json response instead of hanging', async (
     assert.equal(response.json.error, 'API route not found');
 });
 
-test('public why-niyam deck is accessible without auth and serves presentation assets', async () => {
+test('server no longer serves why-niyam deck and falls back to dashboard shell', async () => {
     const response = await fetch(`${baseUrl}/why-niyam`);
     assert.equal(response.status, 200);
 
     const html = await response.text();
-    assert.match(html, /Why Niyam Exists \| Command Control/);
-    assert.match(html, /The shell was never supposed to be an honor system\./);
-    assert.match(html, /\/css\/why-niyam\.css/);
-    assert.match(html, /\/js\/why-niyam\.js/);
-
-    const cssResponse = await fetch(`${baseUrl}/css/why-niyam.css`);
-    assert.equal(cssResponse.status, 200);
-    assert.match(await cssResponse.text(), /progress-rail/);
-
-    const jsResponse = await fetch(`${baseUrl}/js/why-niyam.js`);
-    assert.equal(jsResponse.status, 200);
-    assert.match(await jsResponse.text(), /IntersectionObserver/);
-
-    const imageResponse = await fetch(`${baseUrl}/assets/presentation/niyam-dashboard.png`);
-    assert.equal(imageResponse.status, 200);
-    assert.equal(imageResponse.headers.get('content-type'), 'image/png');
+    assert.match(html, /Niyam \| Command Control/);
+    assert.doesNotMatch(html, /Why Niyam Exists \| Command Control/);
+    assert.doesNotMatch(html, /The shell was never supposed to be an honor system\./);
 });
 
 test('built-in rule pack install is idempotent and influences simulation', async () => {
