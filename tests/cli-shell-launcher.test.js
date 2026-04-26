@@ -45,12 +45,15 @@ test('buildBootstrapCommand bypasses Niyam interception for the initial bootstra
 
 test('prepareCliShellEnvironment creates an isolated config without touching the shared config', () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'niyam-shell-home-'));
-    const sharedConfigPath = path.join(tempHome, '.config', 'niyam', 'config.json');
+    const xdgConfigHome = path.join(tempHome, '.config');
+    const sharedConfigPath = path.join(xdgConfigHome, 'niyam', 'config.json');
     const originalHome = process.env.HOME;
+    const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
     const originalConfigPath = process.env.NIYAM_CLI_CONFIG_PATH;
     let shellEnvironment;
 
     process.env.HOME = tempHome;
+    process.env.XDG_CONFIG_HOME = xdgConfigHome;
     delete process.env.NIYAM_CLI_CONFIG_PATH;
 
     try {
@@ -104,6 +107,12 @@ test('prepareCliShellEnvironment creates an isolated config without touching the
             process.env.HOME = originalHome;
         }
 
+        if (originalXdgConfigHome === undefined) {
+            delete process.env.XDG_CONFIG_HOME;
+        } else {
+            process.env.XDG_CONFIG_HOME = originalXdgConfigHome;
+        }
+
         if (originalConfigPath === undefined) {
             delete process.env.NIYAM_CLI_CONFIG_PATH;
         } else {
@@ -119,15 +128,18 @@ test('prepareCliShellEnvironment creates an isolated config without touching the
 
 test('NIYAM_CLI_CONFIG_PATH scopes CLI auth changes to the isolated shell config', () => {
     const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'niyam-cli-config-home-'));
-    const sharedConfigPath = path.join(tempHome, '.config', 'niyam', 'config.json');
+    const xdgConfigHome = path.join(tempHome, '.config');
+    const sharedConfigPath = path.join(xdgConfigHome, 'niyam', 'config.json');
     const isolatedConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), 'niyam-cli-isolated-'));
     const isolatedConfigPath = path.join(isolatedConfigDir, 'config.json');
     const cliPath = path.join(process.cwd(), 'bin', 'niyam-cli.js');
     const originalHome = process.env.HOME;
+    const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
     const originalConfigPath = process.env.NIYAM_CLI_CONFIG_PATH;
 
     try {
         process.env.HOME = tempHome;
+        process.env.XDG_CONFIG_HOME = xdgConfigHome;
         delete process.env.NIYAM_CLI_CONFIG_PATH;
 
         ensureCliConfigAtPath(sharedConfigPath, {
@@ -180,6 +192,12 @@ test('NIYAM_CLI_CONFIG_PATH scopes CLI auth changes to the isolated shell config
             process.env.HOME = originalHome;
         }
 
+        if (originalXdgConfigHome === undefined) {
+            delete process.env.XDG_CONFIG_HOME;
+        } else {
+            process.env.XDG_CONFIG_HOME = originalXdgConfigHome;
+        }
+
         if (originalConfigPath === undefined) {
             delete process.env.NIYAM_CLI_CONFIG_PATH;
         } else {
@@ -197,10 +215,17 @@ test('zsh bootstrap keeps the isolated config alive for the current session and 
     const configPath = path.join(tempDir, 'config.json');
     const rcPath = path.join(tempHome, '.zshrc');
     const originalHome = process.env.HOME;
+    const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
     const originalConfigPath = process.env.NIYAM_CLI_CONFIG_PATH;
 
     try {
+        if (!commandExists('zsh')) {
+            test.skip('zsh is not installed in this environment');
+            return;
+        }
+
         process.env.HOME = tempHome;
+        process.env.XDG_CONFIG_HOME = path.join(tempHome, '.config');
         delete process.env.NIYAM_CLI_CONFIG_PATH;
 
         fs.writeFileSync(rcPath, '#!/bin/zsh\n', 'utf8');
@@ -239,6 +264,12 @@ test('zsh bootstrap keeps the isolated config alive for the current session and 
             process.env.HOME = originalHome;
         }
 
+        if (originalXdgConfigHome === undefined) {
+            delete process.env.XDG_CONFIG_HOME;
+        } else {
+            process.env.XDG_CONFIG_HOME = originalXdgConfigHome;
+        }
+
         if (originalConfigPath === undefined) {
             delete process.env.NIYAM_CLI_CONFIG_PATH;
         } else {
@@ -256,4 +287,15 @@ function escapeRegExp(value) {
 
 function shellQuoteForShell(value) {
     return `'${String(value).replace(/'/g, `'\"'\"'`)}'`;
+}
+
+function commandExists(command) {
+    try {
+        execFileSync('sh', ['-c', `command -v ${shellQuoteForShell(command)} >/dev/null 2>&1`], {
+            stdio: 'ignore'
+        });
+        return true;
+    } catch (_error) {
+        return false;
+    }
 }
