@@ -5,14 +5,6 @@ async function openNav(page, testId, expectedTitle) {
     await expect(page.locator('#page-title')).toHaveText(expectedTitle);
 }
 
-test('public presentation route loads without authentication', async ({ page }) => {
-    await page.goto('/why-niyam');
-
-    await expect(page).toHaveTitle(/Why Niyam Exists/i);
-    await expect(page.getByRole('heading', { level: 1, name: /The shell was never supposed to be an honor system/i })).toBeVisible();
-    await expect(page.getByText(/Valid command\. Invalid control model\./i)).toBeVisible();
-});
-
 test('dashboard auth and primary navigation smoke', async ({ page }) => {
     await page.goto('/');
 

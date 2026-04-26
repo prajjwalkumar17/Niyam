@@ -3,7 +3,7 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const { ensureCliConfig } = require('../cli/config');
+const { ensureCliConfigAtPath, loadCliConfig } = require('../cli/config');
 const { getShellRcPath, installShellSnippet, normalizeShell } = require('../cli/shell-snippets');
 
 function createCliShellLauncher(options = {}) {
@@ -27,23 +27,34 @@ function createCliShellLauncher(options = {}) {
             throw error;
         }
 
-        const rcPath = prepareCliShellEnvironment({
-            shell: normalizedShell,
-            cliBinPath,
-            baseUrl: normalizedBaseUrl,
-            token: normalizedToken
-        });
+        let shellEnvironment;
+        let bootstrap;
 
-        const { scriptPath, tempDir } = createShellBootstrapScript({
-            shell: normalizedShell,
-            cliBinPath,
-            rcPath
-        });
+        try {
+            shellEnvironment = prepareCliShellEnvironment({
+                shell: normalizedShell,
+                cliBinPath,
+                baseUrl: normalizedBaseUrl,
+                token: normalizedToken
+            });
+
+            bootstrap = createShellBootstrapScript({
+                shell: normalizedShell,
+                rcPath: shellEnvironment.rcPath,
+                configPath: shellEnvironment.configPath,
+                tempDir: shellEnvironment.tempDir
+            });
+        } catch (error) {
+            if (shellEnvironment) {
+                safeCleanupBootstrapArtifact(shellEnvironment.tempDir);
+            }
+            throw error;
+        }
 
         try {
             const terminalApp = launchTerminalScript({
                 shell: normalizedShell,
-                scriptPath
+                scriptPath: bootstrap.scriptPath
             });
 
             return {
@@ -52,7 +63,7 @@ function createCliShellLauncher(options = {}) {
                 terminalApp
             };
         } catch (error) {
-            safeCleanupBootstrapArtifact(scriptPath, tempDir);
+            safeCleanupBootstrapArtifact(shellEnvironment.tempDir);
             throw error;
         }
     }
@@ -64,27 +75,45 @@ function createCliShellLauncher(options = {}) {
 
 function prepareCliShellEnvironment({ shell, cliBinPath, baseUrl, token }) {
     const normalizedShell = normalizeRequestedShell(shell);
-    ensureCliConfig({
-        baseUrl: String(baseUrl || '').trim(),
-        managedToken: String(token || '').trim(),
-        sessionCookie: ''
-    }, { applyEnvOverrides: false });
+    const { config: sharedConfig } = loadCliConfig();
     installShellSnippet(normalizedShell, cliBinPath);
-    return getShellRcPath(normalizedShell);
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'niyam-cli-shell-'));
+    const configPath = path.join(tempDir, 'config.json');
+
+    try {
+        ensureCliConfigAtPath(configPath, {
+            ...sharedConfig,
+            baseUrl: String(baseUrl || '').trim(),
+            managedToken: String(token || '').trim(),
+            sessionCookie: ''
+        }, { applyEnvOverrides: false });
+    } catch (error) {
+        safeCleanupBootstrapArtifact(tempDir);
+        throw error;
+    }
+
+    return {
+        rcPath: getShellRcPath(normalizedShell),
+        configPath,
+        tempDir
+    };
 }
 
-function createShellBootstrapScript({ shell, cliBinPath, rcPath }) {
+function createShellBootstrapScript({ shell, rcPath, configPath, tempDir }) {
     const normalizedShell = normalizeRequestedShell(shell);
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'niyam-cli-shell-'));
     const scriptPath = path.join(tempDir, 'bootstrap.sh');
 
     const contents = [
+        `export NIYAM_CLI_CONFIG_PATH=${shellQuote(configPath)}`,
+        '__niyam_dashboard_shell_cleanup() {',
+        normalizedShell === 'bash' ? '  trap - EXIT' : '  zshexit_functions=(${zshexit_functions:#__niyam_dashboard_shell_cleanup})',
+        `  rm -rf -- ${shellQuote(tempDir)} >/dev/null 2>&1 || true`,
+        '}',
+        ...renderShellExitRegistration(normalizedShell),
         `source ${shellQuote(rcPath)}`,
         `command -v clear >/dev/null 2>&1 && clear`,
         `echo 'Niyam CLI wrapper ready in this terminal.'`,
-        `echo 'Run niyam-cli status to confirm the active token label.'`,
-        `rm -f -- ${shellQuote(scriptPath)}`,
-        `rmdir -- ${shellQuote(tempDir)} >/dev/null 2>&1 || true`
+        `echo 'Run niyam-cli status to confirm the active token label.'`
     ].join('\n') + '\n';
 
     fs.writeFileSync(scriptPath, contents, {
@@ -98,8 +127,21 @@ function createShellBootstrapScript({ shell, cliBinPath, rcPath }) {
     };
 }
 
+function renderShellExitRegistration(shell) {
+    if (shell === 'bash') {
+        return ["trap '__niyam_dashboard_shell_cleanup' EXIT"];
+    }
+
+    return [
+        'typeset -ga zshexit_functions',
+        'if [[ " ${zshexit_functions[*]} " != *" __niyam_dashboard_shell_cleanup "* ]]; then',
+        '  zshexit_functions+=(__niyam_dashboard_shell_cleanup)',
+        'fi'
+    ];
+}
+
 function launchTerminalScript({ shell, scriptPath }) {
-    const command = `source ${shellQuote(scriptPath)}`;
+    const command = buildBootstrapCommand(scriptPath);
 
     switch (process.platform) {
         case 'darwin':
@@ -112,6 +154,11 @@ function launchTerminalScript({ shell, scriptPath }) {
             throw error;
         }
     }
+}
+
+function buildBootstrapCommand(scriptPath) {
+    const quotedScriptPath = shellQuote(scriptPath);
+    return `source ${quotedScriptPath} --skip-niyam 2>/dev/null || source ${quotedScriptPath}`;
 }
 
 function launchDarwinTerminal(command, shell) {
@@ -212,18 +259,10 @@ function escapeAppleScriptString(value) {
         .replace(/"/g, '\\"');
 }
 
-function safeCleanupBootstrapArtifact(scriptPath, tempDir) {
-    try {
-        if (scriptPath && fs.existsSync(scriptPath)) {
-            fs.rmSync(scriptPath, { force: true });
-        }
-    } catch (_error) {
-        // Ignore cleanup failures.
-    }
-
+function safeCleanupBootstrapArtifact(tempDir) {
     try {
         if (tempDir && fs.existsSync(tempDir)) {
-            fs.rmdirSync(tempDir);
+            fs.rmSync(tempDir, { recursive: true, force: true });
         }
     } catch (_error) {
         // Ignore cleanup failures.
@@ -231,6 +270,7 @@ function safeCleanupBootstrapArtifact(scriptPath, tempDir) {
 }
 
 module.exports = {
+    buildBootstrapCommand,
     createCliShellLauncher,
     createShellBootstrapScript,
     prepareCliShellEnvironment

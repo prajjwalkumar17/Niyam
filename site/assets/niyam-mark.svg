@@ -1,0 +1,22 @@
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="niyam-shell" x1="21" y1="12" x2="101" y2="114" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F8FBFF"/>
+      <stop offset="0.42" stop-color="#77D4FF"/>
+      <stop offset="1" stop-color="#0E6AA8"/>
+    </linearGradient>
+    <linearGradient id="niyam-core" x1="45" y1="26" x2="85" y2="94" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFE7A6"/>
+      <stop offset="1" stop-color="#F0A91F"/>
+    </linearGradient>
+    <linearGradient id="niyam-slice" x1="28" y1="42" x2="98" y2="80" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0E1524"/>
+      <stop offset="1" stop-color="#1B2B43"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="30" fill="#08111D"/>
+  <path d="M64 12L103 28V58C103 79.8 89.3 100.7 64 116C38.7 100.7 25 79.8 25 58V28L64 12Z" fill="url(#niyam-shell)"/>
+  <path d="M64 27L89 37.4V57.1C89 72.7 79.7 86.4 64 97C48.3 86.4 39 72.7 39 57.1V37.4L64 27Z" fill="#08111D"/>
+  <path d="M54 33.5L42 61.2H59.8L52 94.5L84 52.7H66.4L74.5 33.5H54Z" fill="url(#niyam-core)"/>
+  <path d="M35 67C49.8 56.2 68.8 51.8 92 53.8V73.7C72 71.7 53 76.1 35 86.7V67Z" fill="url(#niyam-slice)" fill-opacity="0.88"/>
+</svg>

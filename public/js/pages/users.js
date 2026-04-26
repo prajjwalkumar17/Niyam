@@ -564,8 +564,11 @@ function showManagedTokenReveal(token, plainTextToken) {
             openShellButton.disabled = true;
             try {
                 await openTokenShellFromDashboard(plainTextToken, token.label, openShellStatusId);
-            } finally {
+                openShellButton.textContent = 'Opened';
+                openShellButton.setAttribute('aria-disabled', 'true');
+            } catch (error) {
                 openShellButton.disabled = false;
+                openShellButton.removeAttribute('aria-disabled');
             }
         });
     }

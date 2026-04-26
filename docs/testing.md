@@ -22,6 +22,7 @@ Targeted entry points:
 ```bash
 npm run verify:core
 npm run verify:browser
+npm run verify:pages
 npm run verify:deploy
 npm run verify:oneclick
 npm run verify:docker
@@ -33,6 +34,7 @@ Supporting commands:
 ```bash
 npm test
 npm run test:perf
+npm run preview:pages
 npm run smoke
 npm run smoke:wrapper
 npm run smoke:dashboard
@@ -54,12 +56,18 @@ npm run smoke:dashboard:reset
 `npm run verify:browser`
 
 - Playwright smoke against a live local Niyam server
-- unauthenticated `/why-niyam`
 - login flow
 - dashboard navigation
 - rules FAB and pack-library toggle
 - workspace and tokens surfaces
 - activity and audit helper UI
+
+`npm run verify:pages`
+
+- static GitHub Pages deck rooted at `site/index.html`
+- relative CSS, JS, favicon, and presentation asset paths
+- local Pages preview server behavior
+- no dashboard or API dependency
 
 `npm run verify:deploy`
 

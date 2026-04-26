@@ -23,39 +23,55 @@ function getConfigPath() {
     return path.join(getConfigDir(), 'config.json');
 }
 
+function resolveConfigPath(configPath) {
+    if (configPath) {
+        return path.resolve(configPath);
+    }
+
+    return getConfigPath();
+}
+
 function loadCliConfig() {
-    const configPath = getConfigPath();
+    return loadCliConfigAtPath();
+}
+
+function loadCliConfigAtPath(configPath, options = {}) {
+    const resolvedConfigPath = resolveConfigPath(configPath);
     const defaults = getDefaultCliConfig();
     let fileConfig = {};
 
-    if (fs.existsSync(configPath)) {
-        fileConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    if (fs.existsSync(resolvedConfigPath)) {
+        fileConfig = JSON.parse(fs.readFileSync(resolvedConfigPath, 'utf8'));
     }
 
     const config = {
         ...defaults,
         ...fileConfig,
-        ...getExplicitEnvOverrides()
+        ...(options.applyEnvOverrides === false ? {} : getExplicitEnvOverrides())
     };
     config.interactivePatterns = normalizeStringArray(config.interactivePatterns, defaults.interactivePatterns);
     config.skipCommands = normalizeStringArray(config.skipCommands, defaults.skipCommands);
 
     return {
-        configPath,
+        configPath: resolvedConfigPath,
         config
     };
 }
 
 function ensureCliConfig(overrides = {}, options = {}) {
-    const configPath = getConfigPath();
-    const configDir = path.dirname(configPath);
+    return ensureCliConfigAtPath(undefined, overrides, options);
+}
+
+function ensureCliConfigAtPath(configPath, overrides = {}, options = {}) {
+    const resolvedConfigPath = resolveConfigPath(configPath);
+    const configDir = path.dirname(resolvedConfigPath);
     if (!fs.existsSync(configDir)) {
         fs.mkdirSync(configDir, { recursive: true });
     }
 
     let current = {};
-    if (fs.existsSync(configPath)) {
-        current = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    if (fs.existsSync(resolvedConfigPath)) {
+        current = JSON.parse(fs.readFileSync(resolvedConfigPath, 'utf8'));
     }
 
     const next = {
@@ -67,9 +83,9 @@ function ensureCliConfig(overrides = {}, options = {}) {
     next.interactivePatterns = normalizeStringArray(next.interactivePatterns, DEFAULT_INTERACTIVE_PATTERNS);
     next.skipCommands = normalizeStringArray(next.skipCommands, ['niyam-cli']);
 
-    fs.writeFileSync(configPath, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
+    fs.writeFileSync(resolvedConfigPath, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
     return {
-        configPath,
+        configPath: resolvedConfigPath,
         config: next
     };
 }
@@ -117,7 +133,10 @@ function normalizeStringArray(value, fallback) {
 
 module.exports = {
     ensureCliConfig,
+    ensureCliConfigAtPath,
     getConfigDir,
     getConfigPath,
-    loadCliConfig
+    loadCliConfig,
+    loadCliConfigAtPath,
+    resolveConfigPath
 };
