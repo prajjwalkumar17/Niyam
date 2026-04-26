@@ -13,6 +13,7 @@
 </p>
 
 <p align="center">
+  <a href="https://prajjwalkumar17.github.io/Niyam/">Why Niyam Deck</a> ·
   <a href="./docs/local_setup.md">Local Setup</a> ·
   <a href="./docs/individual_setup.md">Individual Setup</a> ·
   <a href="./docs/team_setup.md">Team Setup</a> ·
@@ -27,6 +28,8 @@
 ![Niyam dashboard](./docs/assets/niyam-dashboard.png)
 
 ## Why It Exists
+
+Public deck: [prajjwalkumar17.github.io/Niyam](https://prajjwalkumar17.github.io/Niyam/)
 
 AI agents are useful right up until they become invisible shells with too much reach.
 
