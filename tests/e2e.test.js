@@ -245,6 +245,105 @@ test('playground creates safe lifecycle runs across dashboard and wrapper modes'
     assert.ok(runs.json.runs.some(run => run.id === blocked.json.run.id));
 });
 
+test('playground custom simulations are ephemeral predictions only', async () => {
+    const blockRule = await apiJson('/api/rules', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            name: 'Block Playground Simulation Echo',
+            description: 'Force a blocked playground simulation route for testing',
+            rule_type: 'denylist',
+            pattern: 'echo blocked-simulation',
+            priority: 710
+        }
+    });
+    assert.equal(blockRule.status, 201);
+
+    const readCounts = () => {
+        const db = new Database(path.join(dataDir, 'niyam.db'), { readonly: true });
+        try {
+            return {
+                commands: db.prepare('SELECT COUNT(*) AS count FROM commands').get().count,
+                cliDispatches: db.prepare('SELECT COUNT(*) AS count FROM cli_dispatches').get().count,
+                playgroundRuns: db.prepare('SELECT COUNT(*) AS count FROM playground_runs').get().count,
+                auditEntries: db.prepare('SELECT COUNT(*) AS count FROM audit_log').get().count
+            };
+        } finally {
+            db.close();
+        }
+    };
+    const before = readCounts();
+
+    const manual = await apiJson('/api/playground/simulate', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            rawCommand: 'gh pr create --title custom-demo',
+            sourceMode: 'dashboard',
+            approvalMode: 'off'
+        }
+    });
+    assert.equal(manual.status, 200);
+    assert.equal(manual.json.route, 'DASHBOARD');
+    assert.equal(manual.json.riskLevel, 'MEDIUM');
+    assert.equal(manual.json.predictedStatus, 'pending');
+    assert.equal(manual.json.approvalPrediction.approvalMode, 'manual_pending');
+    assert.equal(manual.json.timelineSteps.length, 4);
+
+    const auto = await apiJson('/api/playground/simulate', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            rawCommand: 'gh pr create --title custom-demo',
+            sourceMode: 'dashboard',
+            approvalMode: 'normal'
+        }
+    });
+    assert.equal(auto.status, 200);
+    assert.equal(auto.json.predictedStatus, 'approved');
+    assert.equal(auto.json.approvalPrediction.approvalMode, 'auto_agent_approved');
+
+    const local = await apiJson('/api/playground/simulate', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            rawCommand: 'cd public',
+            sourceMode: 'wrapper',
+            approvalMode: 'off'
+        }
+    });
+    assert.equal(local.status, 200);
+    assert.equal(local.json.route, 'LOCAL_PASSTHROUGH');
+    assert.equal(local.json.predictedStatus, 'created');
+
+    const blocked = await apiJson('/api/playground/simulate', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            rawCommand: 'echo blocked-simulation',
+            sourceMode: 'wrapper',
+            approvalMode: 'all'
+        }
+    });
+    assert.equal(blocked.status, 200);
+    assert.equal(blocked.json.route, 'BLOCKED');
+    assert.equal(blocked.json.predictedStatus, 'blocked');
+    assert.equal(blocked.json.allowed, false);
+
+    const customRun = await apiJson('/api/playground/runs', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            scenario: 'custom',
+            rawCommand: 'echo should-not-save'
+        }
+    });
+    assert.equal(customRun.status, 400);
+    assert.match(customRun.json.error, /simulation-only/i);
+
+    assert.deepEqual(readCounts(), before);
+});
+
 test('write endpoints reject invalid payloads', async () => {
     const badSimulation = await apiJson('/api/policy/simulate', {
         method: 'POST',

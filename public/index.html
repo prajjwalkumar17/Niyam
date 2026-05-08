@@ -33,14 +33,6 @@
                 </a>
             </li>
             <li>
-                <a href="#playground" class="nav-link" data-page="playground" data-testid="nav-playground">
-                    <span class="nav-icon" aria-hidden="true">
-                        <svg viewBox="0 0 24 24"><path d="M5 6h14M5 12h9M5 18h14m-3-9 3 3-3 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    </span>
-                    <span class="nav-text">Playground</span>
-                </a>
-            </li>
-            <li>
                 <a href="#pending" class="nav-link" data-page="pending" data-testid="nav-pending">
                     <span class="nav-icon" aria-hidden="true">
                         <svg viewBox="0 0 24 24"><path d="M8 4h8M8 20h8M8 4c0 4 8 4 8 8s-8 4-8 8M16 4c0 4-8 4-8 8s8 4 8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -63,6 +55,14 @@
                         <svg viewBox="0 0 24 24"><path d="M9 4h6l1 2h3v14H5V6h3l1-2Zm0 6h6M9 12h6M9 16h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </span>
                     <span class="nav-text">Rules</span>
+                </a>
+            </li>
+            <li>
+                <a href="#playground" class="nav-link" data-page="playground" data-testid="nav-playground">
+                    <span class="nav-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24"><path d="M5 6h14M5 12h9M5 18h14m-3-9 3 3-3 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </span>
+                    <span class="nav-text">Playground</span>
                 </a>
             </li>
             <li>
@@ -121,6 +121,51 @@
             <!-- Pages rendered dynamically -->
         </div>
     </main>
+
+    <!-- Submit Direct Command Modal -->
+    <div class="modal-overlay" id="submit-modal" data-testid="submit-command-modal" style="display:none">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Submit Direct Command</h2>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="cmd-input">Command</label>
+                    <input type="text" id="cmd-input" class="form-input" placeholder="e.g. gh pr merge 42" data-testid="direct-command-input">
+                </div>
+                <div class="form-group">
+                    <label for="cmd-args">Arguments (comma-separated)</label>
+                    <input type="text" id="cmd-args" class="form-input" placeholder="e.g. --squash, --delete-branch">
+                </div>
+                <div class="form-group">
+                    <label for="cmd-requester">Requester</label>
+                    <input type="text" id="cmd-requester" class="form-input" readonly>
+                </div>
+                <div class="form-group">
+                    <label for="cmd-timeout">Timeout (hours) <span style="color:var(--text-muted);font-weight:normal">optional, default 10h</span></label>
+                    <input type="number" id="cmd-timeout" class="form-input" placeholder="e.g. 10" min="1" max="168" step="1">
+                </div>
+                <div class="form-group">
+                    <label for="cmd-working-dir">Working Directory</label>
+                    <input type="text" id="cmd-working-dir" class="form-input" placeholder="Optional absolute path">
+                </div>
+                <div class="risk-preview" id="risk-preview" style="display:none">
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                        <span class="risk-label" id="risk-preview-label">RISK</span>
+                        <span class="status-badge" id="execution-preview-badge">DIRECT</span>
+                        <span class="risk-text" id="risk-preview-text"></span>
+                    </div>
+                    <div class="text-sm text-muted" id="risk-preview-extra" style="margin-top:8px"></div>
+                    <div class="text-sm text-muted" id="risk-preview-rules" style="margin-top:6px"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button class="btn btn-primary" id="submit-btn" onclick="submitCommand()">Submit Direct Command</button>
+            </div>
+        </div>
+    </div>
 
     <!-- Approval Modal -->
     <div class="modal-overlay" id="approval-modal" style="display:none">

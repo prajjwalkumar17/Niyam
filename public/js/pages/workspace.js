@@ -16,6 +16,14 @@ function renderWorkspace(container) {
                 <p class="workspace-subtitle">Use this page for the current dashboard identity, the live server shape, and the CLI wrapper commands that match the active Niyam instance.</p>
             </div>
             <div class="dashboard-hero-rail">
+                <div class="workspace-hero-actions">
+                    <button class="btn btn-primary workspace-direct-command-btn" type="button" data-submit-command-trigger data-testid="workspace-submit-direct-command">
+                        <span class="btn-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                        </span>
+                        Submit Direct Command
+                    </button>
+                </div>
                 <div class="dashboard-hero-note" id="workspace-hero-note">Admin sessions see instance details. Local user sessions can also manage their own CLI tokens here.</div>
                 <div class="workspace-controls" id="workspace-chip-rail"></div>
             </div>

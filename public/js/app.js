@@ -1473,26 +1473,47 @@ function showNotification(message, type = 'info') {
 // Submit Command Modal
 // ═══════════════════════════════════════════
 function initSubmitModal() {
-    const submitCommandBtn = document.getElementById('submit-command-btn');
-    if (!submitCommandBtn) {
+    document.addEventListener('click', event => {
+        const trigger = event.target.closest('[data-submit-command-trigger], #submit-command-btn');
+        if (!trigger) {
+            return;
+        }
+        event.preventDefault();
+        openSubmitModal();
+    });
+
+    const commandInput = document.getElementById('cmd-input');
+    const argsInput = document.getElementById('cmd-args');
+    const workingDirInput = document.getElementById('cmd-working-dir');
+    if (commandInput) {
+        commandInput.addEventListener('input', schedulePolicyPreview);
+    }
+    if (argsInput) {
+        argsInput.addEventListener('input', schedulePolicyPreview);
+    }
+    if (workingDirInput) {
+        workingDirInput.addEventListener('input', schedulePolicyPreview);
+    }
+}
+
+function openSubmitModal() {
+    if (!state.principal) {
+        showLoginOverlay('Sign in to submit commands.');
         return;
     }
 
-    submitCommandBtn.addEventListener('click', () => {
-        if (!state.principal) {
-            showLoginOverlay('Sign in to submit commands.');
-            return;
-        }
-        const requesterInput = document.getElementById('cmd-requester');
-        if (requesterInput) {
-            requesterInput.value = state.principal.identifier;
-        }
-        document.getElementById('submit-modal').style.display = 'flex';
-    });
+    const submitModal = document.getElementById('submit-modal');
+    if (!submitModal) {
+        showNotification('Direct command form is unavailable', 'error');
+        return;
+    }
 
-    document.getElementById('cmd-input').addEventListener('input', schedulePolicyPreview);
-    document.getElementById('cmd-args').addEventListener('input', schedulePolicyPreview);
-    document.getElementById('cmd-working-dir').addEventListener('input', schedulePolicyPreview);
+    const requesterInput = document.getElementById('cmd-requester');
+    if (requesterInput) {
+        requesterInput.value = state.principal.identifier;
+    }
+    submitModal.style.display = 'flex';
+    document.getElementById('cmd-input')?.focus();
 }
 
 function closeModal() {

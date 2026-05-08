@@ -5,7 +5,12 @@
 const playgroundState = {
     scenario: 'dashboard_medium',
     approvalMode: 'off',
-    customCommand: 'echo playground',
+    simulationCommand: 'gh pr create --title custom-demo',
+    simulationSourceMode: 'dashboard',
+    simulationApprovalMode: 'off',
+    simulationWorkingDir: '',
+    simulationResult: null,
+    simulatorCollapsed: true,
     recentRuns: [],
     activeRun: null,
     loading: false
@@ -51,14 +56,6 @@ const PLAYGROUND_SCENARIOS = {
         description: 'Uses a deterministic playground policy rule to show a blocked shell line.',
         source: 'Wrapper',
         expected: 'Creates a blocked dispatch without creating a governed command.'
-    },
-    custom: {
-        title: 'Custom Safe Run',
-        eyebrow: 'Preview first',
-        command: 'echo playground',
-        description: 'Try any command line in safe lifecycle mode. It creates records but does not execute arbitrary OS commands.',
-        source: 'Dashboard',
-        expected: 'Uses the dashboard command path in safe lifecycle mode.'
     }
 };
 
@@ -69,13 +66,72 @@ function renderPlayground(container) {
                 <div class="playground-stage-copy">
                     <div class="workspace-kicker">Command Playground</div>
                     <h2 class="playground-title">Run safe lifecycle demos across dashboard, wrapper, and auto-approval paths.</h2>
-                    <p class="workspace-subtitle">Every run creates real Niyam records and realtime events, while safe mode keeps arbitrary command execution off.</p>
+                    <p class="workspace-subtitle">Curated runs create real Niyam records and realtime events, while safe mode keeps arbitrary command execution off.</p>
                 </div>
                 <div class="playground-safety">
                     <span class="status-dot connected"></span>
                     Safe lifecycle
                 </div>
             </div>
+
+            <section class="surface-card playground-simulator ${playgroundState.simulatorCollapsed ? 'is-collapsed' : ''}" data-testid="custom-command-simulator" id="playground-custom-command-panel">
+                <div class="playground-simulator-head">
+                    <div class="playground-simulator-copy">
+                        <div class="card-title">Custom Command</div>
+                        <div class="surface-section-copy">Preview policy, route, approval, and outcome without storing or executing anything.</div>
+                    </div>
+                    <div class="playground-simulator-summary">
+                        <span class="status-badge approved">Dashboard</span>
+                        <span class="status-badge pending">Wrapper</span>
+                        <span class="status-badge timeout">Simulation only</span>
+                    </div>
+                    <button
+                        class="btn btn-secondary playground-simulator-toggle"
+                        type="button"
+                        id="playground-simulator-toggle"
+                        aria-controls="playground-simulator-details"
+                        aria-expanded="${playgroundState.simulatorCollapsed ? 'false' : 'true'}"
+                    >
+                        ${playgroundState.simulatorCollapsed ? 'Simulate Commands' : 'Hide Simulator'}
+                    </button>
+                </div>
+                <div class="playground-simulator-details" id="playground-simulator-details" aria-hidden="${playgroundState.simulatorCollapsed ? 'true' : 'false'}">
+                    <div class="playground-simulator-intro">
+                        <div class="workspace-kicker">Custom Command Simulator</div>
+                        <h3>Try any command and see what Niyam would do.</h3>
+                        <p>Simulation only. No command is stored or executed.</p>
+                    </div>
+                    <div class="playground-simulator-form">
+                        <label class="playground-command-label" for="playground-sim-command">Command line</label>
+                        <input class="form-input" id="playground-sim-command" data-testid="playground-sim-command" type="text" value="${escapeHtml(playgroundState.simulationCommand)}" placeholder="e.g. gh pr merge 42">
+                        <div class="playground-simulator-grid">
+                            <div>
+                                <div class="playground-control-label">Source mode</div>
+                                <div class="playground-mode-switch playground-sim-switch" id="playground-sim-source-switch" data-cols="2">
+                                    ${renderPlaygroundSimulationButton('source', 'dashboard', 'Dashboard', playgroundState.simulationSourceMode)}
+                                    ${renderPlaygroundSimulationButton('source', 'wrapper', 'Wrapper', playgroundState.simulationSourceMode)}
+                                </div>
+                            </div>
+                            <div>
+                                <div class="playground-control-label">Auto approval</div>
+                                <div class="playground-mode-switch playground-sim-switch" id="playground-sim-approval-switch">
+                                    ${renderPlaygroundSimulationButton('approval', 'off', 'Off', playgroundState.simulationApprovalMode)}
+                                    ${renderPlaygroundSimulationButton('approval', 'normal', 'Normal', playgroundState.simulationApprovalMode)}
+                                    ${renderPlaygroundSimulationButton('approval', 'all', 'All', playgroundState.simulationApprovalMode)}
+                                </div>
+                            </div>
+                        </div>
+                        <label class="playground-command-label" for="playground-sim-working-dir">Working directory</label>
+                        <input class="form-input" id="playground-sim-working-dir" data-testid="playground-sim-working-dir" type="text" value="${escapeHtml(playgroundState.simulationWorkingDir)}" placeholder="Optional absolute path">
+                        <button class="btn btn-primary playground-simulate-btn" id="playground-simulate-btn" data-testid="playground-simulate-command">Simulate Command</button>
+                    </div>
+                    <div class="playground-simulation-result" id="playground-simulation-result" data-testid="playground-simulation-result">
+                        ${playgroundState.simulationResult
+                            ? renderPlaygroundSimulationResultMarkup(playgroundState.simulationResult)
+                            : renderEmptyState('Run a custom simulation to see policy, route, approval, and outcome.', 'activity')}
+                    </div>
+                </div>
+            </section>
 
             <div class="playground-workspace">
                 <aside class="playground-scenarios" id="playground-scenarios"></aside>
@@ -93,7 +149,6 @@ function renderPlayground(container) {
                     <div class="playground-command-line">
                         <code id="playground-command-preview"></code>
                     </div>
-                    <input class="form-input playground-custom-input" id="playground-custom-command" type="text" value="${escapeHtml(playgroundState.customCommand)}" aria-label="Custom playground command">
 
                     <div class="playground-control-row">
                         <div>
@@ -128,7 +183,7 @@ function renderPlayground(container) {
             </div>
         </section>
 
-        <section class="surface-section fade-in">
+        <section class="surface-section playground-recent-section fade-in">
             <div class="surface-section-head">
                 <div>
                     <div class="card-title">Recent Playground Runs</div>
@@ -136,7 +191,7 @@ function renderPlayground(container) {
                 </div>
                 <button class="btn btn-secondary btn-sm" id="playground-refresh-btn">Refresh</button>
             </div>
-            <div class="command-stream" id="playground-recent-runs">
+            <div class="command-stream playground-recent-stream" id="playground-recent-runs">
                 ${renderEmptyState('Loading playground runs...', 'activity')}
             </div>
         </section>
@@ -144,12 +199,25 @@ function renderPlayground(container) {
 
     document.getElementById('playground-run-btn').addEventListener('click', runPlaygroundScenario);
     document.getElementById('playground-refresh-btn').addEventListener('click', refreshPlaygroundData);
-    document.getElementById('playground-custom-command').addEventListener('input', event => {
-        playgroundState.customCommand = event.target.value;
-        if (playgroundState.scenario === 'custom') {
-            renderPlaygroundSelection();
-            previewPlaygroundPolicy();
-        }
+    document.getElementById('playground-simulator-toggle').addEventListener('click', togglePlaygroundSimulator);
+    document.getElementById('playground-simulate-btn').addEventListener('click', simulateCustomPlaygroundCommand);
+    document.getElementById('playground-sim-command').addEventListener('input', event => {
+        playgroundState.simulationCommand = event.target.value;
+    });
+    document.getElementById('playground-sim-working-dir').addEventListener('input', event => {
+        playgroundState.simulationWorkingDir = event.target.value;
+    });
+    document.querySelectorAll('[data-sim-source]').forEach(button => {
+        button.addEventListener('click', () => {
+            playgroundState.simulationSourceMode = button.dataset.simSource;
+            updatePlaygroundSimulationToggles();
+        });
+    });
+    document.querySelectorAll('[data-sim-approval]').forEach(button => {
+        button.addEventListener('click', () => {
+            playgroundState.simulationApprovalMode = button.dataset.simApproval;
+            updatePlaygroundSimulationToggles();
+        });
     });
 
     renderPlaygroundScenarios();
@@ -160,6 +228,39 @@ function renderPlayground(container) {
 
 function renderPlaygroundModeButton(mode, label) {
     return `<button class="playground-mode-btn ${playgroundState.approvalMode === mode ? 'active' : ''}" type="button" data-mode="${mode}">${label}</button>`;
+}
+
+function renderPlaygroundSimulationButton(kind, value, label, selectedValue) {
+    const attribute = kind === 'source' ? 'data-sim-source' : 'data-sim-approval';
+    return `<button class="playground-mode-btn ${selectedValue === value ? 'active' : ''}" type="button" ${attribute}="${value}">${label}</button>`;
+}
+
+function updatePlaygroundSimulationToggles() {
+    document.querySelectorAll('[data-sim-source]').forEach(button => {
+        button.classList.toggle('active', button.dataset.simSource === playgroundState.simulationSourceMode);
+    });
+    document.querySelectorAll('[data-sim-approval]').forEach(button => {
+        button.classList.toggle('active', button.dataset.simApproval === playgroundState.simulationApprovalMode);
+    });
+}
+
+function togglePlaygroundSimulator() {
+    playgroundState.simulatorCollapsed = !playgroundState.simulatorCollapsed;
+    syncPlaygroundSimulatorState();
+}
+
+function syncPlaygroundSimulatorState() {
+    const simulator = document.getElementById('playground-custom-command-panel');
+    const toggle = document.getElementById('playground-simulator-toggle');
+    const details = document.getElementById('playground-simulator-details');
+    if (!simulator || !toggle || !details) {
+        return;
+    }
+
+    simulator.classList.toggle('is-collapsed', playgroundState.simulatorCollapsed);
+    toggle.textContent = playgroundState.simulatorCollapsed ? 'Simulate Commands' : 'Hide Simulator';
+    toggle.setAttribute('aria-expanded', playgroundState.simulatorCollapsed ? 'false' : 'true');
+    details.setAttribute('aria-hidden', playgroundState.simulatorCollapsed ? 'true' : 'false');
 }
 
 function renderPlaygroundScenarios() {
@@ -199,7 +300,6 @@ function renderPlaygroundSelection() {
     document.getElementById('playground-selected-copy').textContent = scenario.description;
     document.getElementById('playground-selected-source').textContent = scenario.source;
     document.getElementById('playground-command-preview').textContent = command;
-    document.getElementById('playground-custom-command').style.display = playgroundState.scenario === 'custom' ? '' : 'none';
 }
 
 async function previewPlaygroundPolicy() {
@@ -277,7 +377,6 @@ async function runPlaygroundScenario() {
             body: JSON.stringify({
                 scenario: playgroundState.scenario,
                 approvalMode: playgroundState.approvalMode,
-                rawCommand: playgroundState.scenario === 'custom' ? playgroundState.customCommand : undefined,
                 safeLifecycle: true
             })
         });
@@ -297,6 +396,72 @@ async function runPlaygroundScenario() {
         button.disabled = false;
         button.textContent = 'Run Scenario';
     }
+}
+
+async function simulateCustomPlaygroundCommand() {
+    const button = document.getElementById('playground-simulate-btn');
+    const command = playgroundState.simulationCommand.trim();
+    const resultTarget = document.getElementById('playground-simulation-result');
+    if (!command) {
+        showNotification('Command is required for simulation', 'error');
+        return;
+    }
+
+    button.disabled = true;
+    button.textContent = 'Simulating...';
+    resultTarget.innerHTML = renderEmptyState('Simulating command...', 'activity');
+
+    try {
+        const response = await apiFetch('/playground/simulate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                rawCommand: command,
+                sourceMode: playgroundState.simulationSourceMode,
+                approvalMode: playgroundState.simulationApprovalMode,
+                workingDir: playgroundState.simulationWorkingDir.trim() || undefined
+            })
+        });
+        const result = await response.json();
+        if (!response.ok) {
+            throw new Error(result.error || 'Simulation failed');
+        }
+
+        playgroundState.simulationResult = result;
+        renderPlaygroundSimulationResult(result);
+        showNotification('Simulation ready', 'success');
+    } catch (error) {
+        resultTarget.innerHTML = renderEmptyState(error.message || 'Simulation failed', 'blocked');
+        showNotification(error.message || 'Simulation failed', 'error');
+    } finally {
+        button.disabled = false;
+        button.textContent = 'Simulate Command';
+    }
+}
+
+function renderPlaygroundSimulationResult(result) {
+    const target = document.getElementById('playground-simulation-result');
+    if (!target) {
+        return;
+    }
+    target.innerHTML = renderPlaygroundSimulationResultMarkup(result);
+}
+
+function renderPlaygroundSimulationResultMarkup(result) {
+    const matchedRules = Array.isArray(result.matchedRules) && result.matchedRules.length > 0
+        ? result.matchedRules.map(rule => rule.name).join(', ')
+        : (result.classifier?.source || 'built-in classifier');
+    return `
+        <div class="playground-simulation-summary">
+            <span class="risk-label ${String(result.riskLevel || 'MEDIUM').toLowerCase()}">${escapeHtml(result.riskLevel || 'MEDIUM')}</span>
+            <span class="status-badge ${playgroundStatusTone(result.predictedStatus)}">${escapeHtml(formatPlaygroundStatus(result.predictedStatus))}</span>
+            <span class="status-badge pending">${escapeHtml(formatPlaygroundRoute(result.route))}</span>
+        </div>
+        <div class="playground-timeline">
+            ${(result.timelineSteps || []).map(step => renderPlaygroundStep(step.label, step.value, step.detail)).join('')}
+        </div>
+        <div class="text-sm text-muted">Rules: ${escapeHtml(matchedRules)}</div>
+    `;
 }
 
 async function refreshPlaygroundData() {
@@ -334,8 +499,10 @@ function renderPlaygroundRecentRuns() {
         return;
     }
 
-    list.innerHTML = playgroundState.recentRuns.map(run => `
-        <article class="command-stream-card playground-run-card fade-in" data-run-id="${escapeHtml(run.id)}">
+    list.innerHTML = playgroundState.recentRuns.map(run => {
+        const isSelected = playgroundState.activeRun?.id === run.id;
+        return `
+        <article class="command-stream-card playground-run-card fade-in${isSelected ? ' is-selected' : ''}" data-run-id="${escapeHtml(run.id)}">
             <div class="command-stream-head">
                 <div class="command-stream-main">
                     <div class="command-stream-badges">
@@ -347,11 +514,12 @@ function renderPlaygroundRecentRuns() {
                     <div class="command-stream-subtitle">${escapeHtml(run.requester || 'playground')} · ${timeAgo(run.createdAt)} · ${escapeHtml(PLAYGROUND_SCENARIOS[run.scenario]?.title || run.scenario)}</div>
                 </div>
                 <div class="command-stream-side">
-                    <button class="btn btn-secondary btn-sm playground-select-run" data-id="${escapeHtml(run.id)}">Inspect</button>
+                    <button class="btn btn-secondary btn-sm playground-select-run" data-testid="playground-inspect-run" data-id="${escapeHtml(run.id)}">${isSelected ? 'Inspecting' : 'Inspect'}</button>
                 </div>
             </div>
         </article>
-    `).join('');
+    `;
+    }).join('');
 
     list.querySelectorAll('.playground-select-run').forEach(button => {
         button.addEventListener('click', () => selectPlaygroundRun(button.dataset.id));
@@ -359,6 +527,13 @@ function renderPlaygroundRecentRuns() {
 }
 
 async function selectPlaygroundRun(runId) {
+    const button = Array.from(document.querySelectorAll('.playground-select-run'))
+        .find(candidate => candidate.dataset.id === runId);
+    if (button) {
+        button.disabled = true;
+        button.textContent = 'Loading...';
+    }
+
     try {
         const response = await apiFetch(`/playground/runs/${encodeURIComponent(runId)}`);
         const result = await response.json();
@@ -367,8 +542,14 @@ async function selectPlaygroundRun(runId) {
         }
         playgroundState.activeRun = result.run;
         renderPlaygroundActiveRun();
+        renderPlaygroundRecentRuns();
+        document.querySelector('.playground-inspector')?.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center'
+        });
     } catch (error) {
         showNotification(error.message || 'Failed to load run', 'error');
+        renderPlaygroundRecentRuns();
     }
 }
 
@@ -414,9 +595,6 @@ function renderPlaygroundStep(label, value, detail) {
 }
 
 function getPlaygroundCommandLine() {
-    if (playgroundState.scenario === 'custom') {
-        return playgroundState.customCommand || 'echo playground';
-    }
     return PLAYGROUND_SCENARIOS[playgroundState.scenario].command;
 }
 

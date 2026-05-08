@@ -9,6 +9,11 @@ function createPlaygroundRouter(db, broadcast) {
         res.status(result.statusCode).json(result.body);
     });
 
+    router.post('/simulate', (req, res) => {
+        const result = playground.simulateCommand(req.body || {});
+        res.status(result.statusCode).json(result.body);
+    });
+
     router.get('/runs', (req, res) => {
         res.json(playground.listRuns(req.query || {}));
     });

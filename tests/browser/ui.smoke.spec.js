@@ -80,6 +80,24 @@ test('dashboard auth and primary navigation smoke', async ({ page }) => {
     await expect(page.getByText('Playground run created')).toBeVisible();
     await expect(page.locator('#playground-active-run')).toContainText(/Policy/i);
     await expect(page.locator('#playground-recent-runs')).toContainText('Dashboard Request');
+    await page.getByTestId('playground-inspect-run').first().click();
+    await expect(page.locator('.playground-run-card.is-selected')).toHaveCount(1);
+    await expect(page.getByTestId('playground-inspect-run').first()).toContainText('Inspecting');
+    await expect(page.getByTestId('custom-command-simulator')).toBeVisible();
+    await expect(page.locator('#playground-simulator-toggle')).toHaveText('Simulate Commands');
+    await page.locator('#playground-simulator-toggle').click();
+    await expect(page.locator('#playground-simulator-toggle')).toHaveText('Hide Simulator');
+    const recentRunCount = await page.locator('.playground-run-card').count();
+    await page.getByTestId('playground-sim-command').fill('gh pr create --title browser-sim');
+    await page.getByTestId('playground-simulate-command').click();
+    await expect(page.getByTestId('playground-simulation-result')).toContainText('DASHBOARD');
+    await expect(page.getByTestId('playground-simulation-result')).toContainText('Simulation only');
+    await expect(page.locator('.playground-run-card')).toHaveCount(recentRunCount);
+    await page.locator('[data-sim-source="wrapper"]').click();
+    await page.getByTestId('playground-sim-command').fill('cd public');
+    await page.getByTestId('playground-simulate-command').click();
+    await expect(page.getByTestId('playground-simulation-result')).toContainText('LOCAL PASSTHROUGH');
+    await expect(page.locator('.playground-run-card')).toHaveCount(recentRunCount);
     await page.getByTestId('nav-account').click();
     await expect(page.locator('#page-title')).toHaveText('Account');
     await expect(page.getByTestId('account-session-summary')).toContainText('admin');
@@ -310,6 +328,13 @@ test('dashboard auth and primary navigation smoke', async ({ page }) => {
 
     await openNav(page, 'nav-workspace', 'Workspace');
     await expect(page.getByText(/Runtime context, access posture, and shell setup in one place/i)).toBeVisible();
+    await expect(page.getByTestId('workspace-submit-direct-command')).toBeVisible();
+    await page.getByTestId('workspace-submit-direct-command').click();
+    await expect(page.getByTestId('submit-command-modal')).toBeVisible();
+    await expect(page.locator('#cmd-requester')).toHaveValue('admin');
+    await expect(page.getByTestId('direct-command-input')).toBeFocused();
+    await page.locator('#submit-modal .modal-close').click();
+    await expect(page.getByTestId('submit-command-modal')).toBeHidden();
 
     const tokenLabel = `Browser Auto Token ${Date.now()}`;
     await page.evaluate(async label => {

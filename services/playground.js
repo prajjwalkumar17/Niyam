@@ -1,10 +1,17 @@
 const { v4: uuidv4 } = require('uuid');
 
 const { buildAutoApprovalProfile, normalizeAutoApprovalMode } = require('./auto-approval-modes');
-const { createCliDispatchService } = require('./cli-dispatches');
+const { createCliDispatchService, determineDispatchRoute } = require('./cli-dispatches');
 const { persistCommandSubmission, prepareCommandSubmission } = require('./command-submissions');
 const { buildAuthenticationContext } = require('./auth-context');
 const { parseJson, shapeCliDispatchRecord, shapeCommandRecord } = require('./record-shaping');
+const PolicyEngine = require('../policy/engine');
+const {
+    hasShellSyntax,
+    isLikelyInteractiveCommand,
+    parseSimpleCommand,
+    tokenizeCommand
+} = require('../lib/command-line');
 
 const PLAYGROUND_SCENARIOS = {
     dashboard_medium: {
@@ -41,23 +48,61 @@ const PLAYGROUND_SCENARIOS = {
         rawCommand: 'playground-blocked --demo',
         firstToken: 'playground-blocked',
         firstTokenType: 'external'
-    },
-    custom: {
-        label: 'Custom Safe Run',
-        source: 'dashboard',
-        command: 'echo',
-        args: ['playground'],
-        rawCommand: 'echo playground'
     }
 };
 
 const PLAYGROUND_BLOCK_RULE_ID = 'playground-demo-block-rule';
+const SIMULATION_SOURCE_MODES = new Set(['dashboard', 'wrapper']);
+const SHELL_BUILTINS = new Set([
+    '.',
+    ':',
+    'alias',
+    'bg',
+    'break',
+    'cd',
+    'command',
+    'continue',
+    'dirs',
+    'disown',
+    'echo',
+    'eval',
+    'exec',
+    'exit',
+    'export',
+    'false',
+    'fg',
+    'hash',
+    'history',
+    'jobs',
+    'popd',
+    'pushd',
+    'pwd',
+    'read',
+    'return',
+    'set',
+    'shift',
+    'source',
+    'test',
+    'true',
+    'type',
+    'ulimit',
+    'unalias',
+    'unset',
+    'wait'
+]);
 
 function createPlaygroundService(db, options = {}) {
     const broadcast = options.broadcast;
     const cliDispatches = createCliDispatchService(db, { broadcast });
 
     function createRun(payload = {}, principal = {}, authentication = null) {
+        if (String(payload.scenario || '').trim() === 'custom') {
+            return {
+                statusCode: 400,
+                body: { error: 'Custom commands are simulation-only. Use /api/playground/simulate instead.' }
+            };
+        }
+
         const scenarioId = normalizeScenario(payload.scenario);
         const scenario = PLAYGROUND_SCENARIOS[scenarioId];
         const approvalMode = normalizeAutoApprovalMode(payload.approvalMode || payload.autoApprovalMode || 'off');
@@ -135,6 +180,130 @@ function createPlaygroundService(db, options = {}) {
                 outcome
             }
         };
+    }
+
+    function simulateCommand(payload = {}) {
+        const rawCommand = String(payload.rawCommand || payload.command || '').trim();
+        if (!rawCommand) {
+            return {
+                statusCode: 400,
+                body: { error: 'Command is required for playground simulation' }
+            };
+        }
+
+        const sourceMode = normalizeSimulationSourceMode(payload.sourceMode);
+        const approvalMode = normalizeAutoApprovalMode(payload.approvalMode || payload.autoApprovalMode || 'off');
+        const workingDir = String(payload.workingDir || '').trim() || null;
+
+        const result = sourceMode === 'wrapper'
+            ? simulateWrapperCommand({ rawCommand, approvalMode, workingDir })
+            : simulateDashboardCommand({ rawCommand, approvalMode, workingDir });
+
+        return {
+            statusCode: 200,
+            body: result
+        };
+    }
+
+    function simulateDashboardCommand({ rawCommand, approvalMode, workingDir }) {
+        const parsed = parseSimpleCommand(rawCommand);
+        if (!parsed) {
+            return buildSkippedSimulation({
+                rawCommand,
+                sourceMode: 'dashboard',
+                approvalMode,
+                workingDir,
+                reason: 'Command could not be tokenized safely'
+            });
+        }
+
+        const policyEngine = new PolicyEngine(db);
+        const simulation = policyEngine.simulate({
+            command: parsed.command,
+            args: parsed.args,
+            metadata: { source: 'playground-simulation' },
+            workingDir
+        });
+        const approval = predictApproval(simulation, approvalMode);
+        const route = simulation.allowed ? 'DASHBOARD' : 'BLOCKED';
+        const predictedStatus = simulation.allowed ? approval.predictedStatus : 'blocked';
+        const reason = simulation.allowed ? simulation.reason : simulation.reason || 'Command blocked by policy';
+
+        return shapeSimulationResponse({
+            rawCommand,
+            command: parsed.command,
+            args: parsed.args,
+            sourceMode: 'dashboard',
+            approvalMode,
+            route,
+            predictedStatus,
+            simulation,
+            approval,
+            reason,
+            workingDir
+        });
+    }
+
+    function simulateWrapperCommand({ rawCommand, approvalMode, workingDir }) {
+        const policyEngine = new PolicyEngine(db);
+        const parsed = parseSimpleCommand(rawCommand);
+        const simulation = policyEngine.simulate({
+            command: rawCommand,
+            args: [],
+            metadata: { source: 'playground-simulation' },
+            workingDir
+        });
+        const routeResult = determineDispatchRoute({
+            allowed: simulation.allowed,
+            reason: simulation.reason,
+            firstTokenType: inferFirstTokenType(rawCommand),
+            shellSyntax: hasShellSyntax(rawCommand),
+            interactiveHint: isLikelyInteractiveCommand(rawCommand),
+            parsedCommand: parsed
+        });
+
+        let commandSimulation = simulation;
+        if (routeResult.route === 'REMOTE_EXEC' && parsed) {
+            commandSimulation = policyEngine.simulate({
+                command: parsed.command,
+                args: parsed.args,
+                metadata: { source: 'playground-simulation' },
+                workingDir
+            });
+            if (!commandSimulation.allowed) {
+                routeResult.route = 'BLOCKED';
+                routeResult.status = 'blocked';
+                routeResult.reason = commandSimulation.reason;
+            }
+        }
+
+        const approval = routeResult.route === 'REMOTE_EXEC'
+            ? predictApproval(commandSimulation, approvalMode)
+            : {
+                approvalMode: routeResult.route === 'BLOCKED' ? 'not_requested' : 'not_required',
+                predictedStatus: routeResult.status,
+                detail: routeResult.route === 'BLOCKED'
+                    ? 'Policy blocks this shell line before approval.'
+                    : 'This shell line would stay local and would not create a governed command.'
+            };
+        const predictedStatus = routeResult.route === 'REMOTE_EXEC'
+            ? approval.predictedStatus
+            : routeResult.status;
+
+        return shapeSimulationResponse({
+            rawCommand,
+            command: parsed?.command || rawCommand,
+            args: parsed?.args || [],
+            sourceMode: 'wrapper',
+            approvalMode,
+            route: routeResult.route,
+            predictedStatus,
+            simulation: commandSimulation,
+            approval,
+            reason: routeResult.reason || commandSimulation.reason,
+            passthroughReason: routeResult.passthroughReason,
+            workingDir
+        });
     }
 
     function runDashboardScenario({ runId, scenarioId, commandSpec, metadata, demoIdentity, approvalMode }) {
@@ -365,7 +534,8 @@ function createPlaygroundService(db, options = {}) {
     return {
         createRun,
         getRun,
-        listRuns
+        listRuns,
+        simulateCommand
     };
 }
 
@@ -403,24 +573,183 @@ function buildDemoIdentity(approvalMode) {
 }
 
 function buildCommandSpec(scenarioId, scenario, payload) {
-    if (scenarioId !== 'custom') {
+    return {
+        command: scenario.command,
+        args: scenario.args || [],
+        rawCommand: scenario.rawCommand,
+        workingDir: payload.workingDir || null,
+        shell: payload.shell || 'zsh'
+    };
+}
+
+function normalizeSimulationSourceMode(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    return SIMULATION_SOURCE_MODES.has(normalized) ? normalized : 'dashboard';
+}
+
+function inferFirstTokenType(rawCommand) {
+    const firstToken = tokenizeCommand(rawCommand)[0];
+    if (!firstToken) {
+        return 'unknown';
+    }
+    return SHELL_BUILTINS.has(firstToken) ? 'builtin' : 'external';
+}
+
+function predictApproval(simulation, approvalMode) {
+    if (!simulation.allowed) {
         return {
-            command: scenario.command,
-            args: scenario.args || [],
-            rawCommand: scenario.rawCommand,
-            workingDir: payload.workingDir || null,
-            shell: payload.shell || 'zsh'
+            approvalMode: 'not_requested',
+            predictedStatus: 'blocked',
+            detail: 'Policy blocks this command before approval.'
         };
     }
 
-    const rawCommand = String(payload.rawCommand || payload.command || scenario.rawCommand).trim() || scenario.rawCommand;
-    const parts = rawCommand.split(/\s+/).filter(Boolean);
+    if (simulation.autoApproved) {
+        return {
+            approvalMode: 'policy_auto',
+            predictedStatus: 'approved',
+            detail: 'Low-risk policy would auto-approve this command.'
+        };
+    }
+
+    const preference = buildAutoApprovalProfile(approvalMode, 'playground');
+    const riskLevel = simulation.riskLevel;
+
+    if (riskLevel === 'MEDIUM' && preference.autoApprovesMedium) {
+        return {
+            approvalMode: 'auto_agent_approved',
+            predictedStatus: 'approved',
+            detail: 'Niyam Auto Approver would approve this medium-risk command.'
+        };
+    }
+
+    if (riskLevel === 'HIGH' && preference.autoApprovesHigh) {
+        return {
+            approvalMode: 'auto_agent_approved',
+            predictedStatus: 'approved',
+            detail: 'Approve Everything would approve this high-risk command.'
+        };
+    }
+
+    if (riskLevel === 'HIGH' && preference.assistsHighRisk) {
+        return {
+            approvalMode: 'auto_agent_pending',
+            predictedStatus: 'pending',
+            detail: 'Niyam Auto Approver would add one approval, then a human approval would still be needed.'
+        };
+    }
+
     return {
-        command: parts[0] || scenario.command,
-        args: parts.slice(1),
+        approvalMode: 'manual_pending',
+        predictedStatus: 'pending',
+        detail: `${simulation.threshold?.requiredApprovals || 1} human approval(s) would be required.`
+    };
+}
+
+function buildSkippedSimulation({ rawCommand, sourceMode, approvalMode, workingDir, reason }) {
+    const simulation = {
+        allowed: true,
+        reason,
+        riskLevel: 'LOW',
+        executionMode: 'DIRECT',
+        threshold: {
+            requiredApprovals: 0,
+            rationaleRequired: false
+        },
+        matchedRules: [],
+        redactionPreview: {
+            commandChanged: false,
+            argsChanged: false,
+            metadataChanged: false,
+            metadataPaths: []
+        },
+        autoApproved: true
+    };
+    return shapeSimulationResponse({
         rawCommand,
-        workingDir: payload.workingDir || null,
-        shell: payload.shell || 'zsh'
+        command: rawCommand,
+        args: [],
+        sourceMode,
+        approvalMode,
+        route: 'LOCAL_PASSTHROUGH',
+        predictedStatus: 'created',
+        simulation,
+        approval: {
+            approvalMode: 'not_required',
+            predictedStatus: 'created',
+            detail: reason
+        },
+        reason,
+        workingDir
+    });
+}
+
+function shapeSimulationResponse(options) {
+    const {
+        rawCommand,
+        command,
+        args,
+        sourceMode,
+        approvalMode,
+        route,
+        predictedStatus,
+        simulation,
+        approval,
+        reason,
+        passthroughReason = null,
+        workingDir = null
+    } = options;
+    const allowed = route !== 'BLOCKED' && simulation.allowed !== false;
+    const routeDetail = route === 'DASHBOARD'
+        ? 'Dashboard command request would be created.'
+        : route === 'REMOTE_EXEC'
+            ? 'Wrapper would create a dispatch and link a governed command.'
+            : route === 'LOCAL_PASSTHROUGH'
+                ? reason || 'Wrapper would leave this command in the local shell.'
+                : reason || 'Policy blocks this command before execution.';
+
+    return {
+        rawCommand,
+        command,
+        args,
+        sourceMode,
+        approvalMode,
+        route,
+        predictedStatus,
+        allowed,
+        reason,
+        riskLevel: simulation.riskLevel,
+        executionMode: simulation.executionMode,
+        threshold: simulation.threshold,
+        matchedRules: simulation.matchedRules || [],
+        redactionPreview: simulation.redactionPreview,
+        classifier: simulation.classifier,
+        autoApproved: approval.predictedStatus === 'approved',
+        approvalPrediction: approval,
+        passthroughReason,
+        workingDir,
+        timelineSteps: [
+            {
+                label: 'Policy',
+                value: simulation.riskLevel || 'LOW',
+                detail: simulation.reason || 'Evaluated by policy'
+            },
+            {
+                label: 'Route',
+                value: route,
+                detail: routeDetail
+            },
+            {
+                label: 'Approval',
+                value: approval.approvalMode,
+                detail: approval.detail
+            },
+            {
+                label: 'Outcome',
+                value: predictedStatus,
+                detail: 'Simulation only. No command is stored or executed.'
+            }
+        ]
     };
 }
 

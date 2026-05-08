@@ -494,5 +494,6 @@ function canAccessDispatch(row, principal, authentication) {
 }
 
 module.exports = {
-    createCliDispatchService
+    createCliDispatchService,
+    determineDispatchRoute
 };
