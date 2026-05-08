@@ -268,6 +268,40 @@ const MIGRATIONS = [
                 END
             `);
         }
+    },
+    {
+        id: '010_playground_runs',
+        description: 'Track grouped command playground runs',
+        up(db) {
+            if (!hasTable(db, 'playground_runs')) {
+                db.exec(`
+                    CREATE TABLE playground_runs (
+                        id TEXT PRIMARY KEY,
+                        scenario TEXT NOT NULL,
+                        approval_mode TEXT NOT NULL,
+                        command TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        route TEXT,
+                        command_id TEXT,
+                        dispatch_id TEXT,
+                        requester TEXT,
+                        requester_type TEXT,
+                        safe_lifecycle INTEGER DEFAULT 1,
+                        created_by TEXT,
+                        metadata TEXT,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        FOREIGN KEY (command_id) REFERENCES commands(id) ON DELETE SET NULL,
+                        FOREIGN KEY (dispatch_id) REFERENCES cli_dispatches(id) ON DELETE SET NULL
+                    );
+                `);
+            }
+
+            ensureIndex(db, 'idx_playground_runs_created_at', 'CREATE INDEX idx_playground_runs_created_at ON playground_runs(created_at)');
+            ensureIndex(db, 'idx_playground_runs_created_by', 'CREATE INDEX idx_playground_runs_created_by ON playground_runs(created_by)');
+            ensureIndex(db, 'idx_playground_runs_command_id', 'CREATE INDEX idx_playground_runs_command_id ON playground_runs(command_id)');
+            ensureIndex(db, 'idx_playground_runs_dispatch_id', 'CREATE INDEX idx_playground_runs_dispatch_id ON playground_runs(dispatch_id)');
+        }
     }
 ];
 

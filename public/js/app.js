@@ -64,6 +64,7 @@ const REALTIME_PAGE_EVENT_TYPES = new Set([
 
 const ICONS = {
     dashboard: '<svg viewBox="0 0 24 24"><path d="M4 19h16M7 15v-4M12 15V7M17 15v-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+    playground: '<svg viewBox="0 0 24 24"><path d="M5 6h14M5 12h9M5 18h14m-3-9 3 3-3 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     workspace: '<svg viewBox="0 0 24 24"><path d="M4 6h16v12H4zM8 10h8M8 14h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     pending: '<svg viewBox="0 0 24 24"><path d="M8 4h8M8 20h8M8 4c0 4 8 4 8 8s-8 4-8 8M16 4c0 4-8 4-8 8s8 4 8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     history: '<svg viewBox="0 0 24 24"><path d="M8 5h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8a3 3 0 1 1 0-6h10M8 5a3 3 0 1 0 0 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -77,8 +78,8 @@ const ICONS = {
     package: '<svg viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Zm0 0v9m8-4.5-8 4.5-8-4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 };
 
-const ALL_PAGES = ['dashboard', 'workspace', 'pending', 'history', 'rules', 'audit', 'users', 'account'];
-const DEFAULT_USER_PAGES = ['dashboard', 'workspace', 'pending', 'history', 'account'];
+const ALL_PAGES = ['dashboard', 'playground', 'workspace', 'pending', 'history', 'rules', 'audit', 'users', 'account'];
+const DEFAULT_USER_PAGES = ['dashboard', 'playground', 'workspace', 'pending', 'history', 'account'];
 
 function renderUiIcon(name, className = '') {
     const svg = ICONS[name] || ICONS.activity;
@@ -279,7 +280,10 @@ function enterAuthenticatedState(principal, authentication = null) {
         navigateTo(state.currentPage || 'dashboard');
     }
 
-    document.getElementById('cmd-requester').value = principal.identifier;
+    const requesterInput = document.getElementById('cmd-requester');
+    if (requesterInput) {
+        requesterInput.value = principal.identifier;
+    }
     updatePendingBadge();
 
     if (!state.ws || state.ws.readyState === WebSocket.CLOSED) {
@@ -525,6 +529,7 @@ function navigateTo(page) {
     // Update page title
     const titles = {
         dashboard: 'Dashboard',
+        playground: 'Playground',
         workspace: 'Workspace',
         pending: 'Pending Approvals',
         history: 'Activity',
@@ -542,6 +547,7 @@ function navigateTo(page) {
     
     switch (page) {
         case 'dashboard': renderDashboard(container); break;
+        case 'playground': renderPlayground(container); break;
         case 'workspace': renderWorkspace(container); break;
         case 'pending': renderPending(container); break;
         case 'history': renderHistory(container); break;
@@ -614,6 +620,9 @@ async function refreshCurrentPageData() {
                     loadRecentActivity(),
                     loadPendingPreview()
                 ]);
+                break;
+            case 'playground':
+                await refreshPlaygroundData();
                 break;
             case 'workspace':
                 await loadWorkspaceDetails();
@@ -1464,12 +1473,20 @@ function showNotification(message, type = 'info') {
 // Submit Command Modal
 // ═══════════════════════════════════════════
 function initSubmitModal() {
-    document.getElementById('submit-command-btn').addEventListener('click', () => {
+    const submitCommandBtn = document.getElementById('submit-command-btn');
+    if (!submitCommandBtn) {
+        return;
+    }
+
+    submitCommandBtn.addEventListener('click', () => {
         if (!state.principal) {
             showLoginOverlay('Sign in to submit commands.');
             return;
         }
-        document.getElementById('cmd-requester').value = state.principal.identifier;
+        const requesterInput = document.getElementById('cmd-requester');
+        if (requesterInput) {
+            requesterInput.value = state.principal.identifier;
+        }
         document.getElementById('submit-modal').style.display = 'flex';
     });
 
@@ -1479,7 +1496,11 @@ function initSubmitModal() {
 }
 
 function closeModal() {
-    document.getElementById('submit-modal').style.display = 'none';
+    const submitModal = document.getElementById('submit-modal');
+    if (!submitModal) {
+        return;
+    }
+    submitModal.style.display = 'none';
     document.getElementById('cmd-input').value = '';
     document.getElementById('cmd-args').value = '';
     document.getElementById('cmd-timeout').value = '';
@@ -1493,7 +1514,11 @@ function hidePolicyPreview() {
         state.previewTimer = null;
     }
 
-    document.getElementById('risk-preview').style.display = 'none';
+    const preview = document.getElementById('risk-preview');
+    if (!preview) {
+        return;
+    }
+    preview.style.display = 'none';
     document.getElementById('risk-preview-text').textContent = '';
     document.getElementById('risk-preview-extra').textContent = '';
     document.getElementById('risk-preview-rules').textContent = '';

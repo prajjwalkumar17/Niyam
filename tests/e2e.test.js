@@ -179,6 +179,72 @@ test('cli dispatches support remote exec, local passthrough, and blocked routing
     assert.ok(audit.json.entries.some(entry => entry.event_type === 'cli_dispatch_blocked'));
 });
 
+test('playground creates safe lifecycle runs across dashboard and wrapper modes', async () => {
+    const manual = await apiJson('/api/playground/runs', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            scenario: 'dashboard_medium',
+            approvalMode: 'off'
+        }
+    });
+    assert.equal(manual.status, 201);
+    assert.equal(manual.json.run.scenario, 'dashboard_medium');
+    assert.equal(manual.json.run.status, 'pending');
+    assert.equal(manual.json.run.route, 'DASHBOARD');
+    assert.ok(manual.json.run.commandId);
+    assert.equal(manual.json.run.commandRecord.requester, 'playground-off');
+    assert.equal(manual.json.run.commandRecord.metadata.source, 'playground');
+    assert.equal(manual.json.run.commandRecord.metadata.playgroundRunId, manual.json.run.id);
+
+    const auto = await apiJson('/api/playground/runs', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            scenario: 'dashboard_medium',
+            approvalMode: 'normal'
+        }
+    });
+    assert.equal(auto.status, 201);
+    assert.equal(auto.json.run.status, 'approved');
+    assert.equal(auto.json.run.commandRecord.metadata.playgroundApprovalMode, 'normal');
+
+    const local = await apiJson('/api/playground/runs', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            scenario: 'wrapper_local',
+            approvalMode: 'off'
+        }
+    });
+    assert.equal(local.status, 201);
+    assert.equal(local.json.run.route, 'LOCAL_PASSTHROUGH');
+    assert.equal(local.json.run.status, 'local_completed');
+    assert.equal(local.json.run.commandId, null);
+    assert.equal(local.json.run.dispatchRecord.metadata.playgroundRunId, local.json.run.id);
+
+    const blocked = await apiJson('/api/playground/runs', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            scenario: 'wrapper_blocked',
+            approvalMode: 'all'
+        }
+    });
+    assert.equal(blocked.status, 201);
+    assert.equal(blocked.json.run.route, 'BLOCKED');
+    assert.equal(blocked.json.run.commandId, null);
+    assert.equal(blocked.json.run.status, 'blocked');
+
+    const runs = await apiJson('/api/playground/runs?limit=10', {
+        method: 'GET',
+        cookie: adminCookie
+    });
+    assert.equal(runs.status, 200);
+    assert.ok(runs.json.runs.some(run => run.id === manual.json.run.id));
+    assert.ok(runs.json.runs.some(run => run.id === blocked.json.run.id));
+});
+
 test('write endpoints reject invalid payloads', async () => {
     const badSimulation = await apiJson('/api/policy/simulate', {
         method: 'POST',
@@ -457,7 +523,8 @@ test('versioned migrations are recorded in schema_migrations', async () => {
         '006_managed_tokens_and_auth_context',
         '007_auto_approval_preferences',
         '008_runtime_product_mode_lock',
-        '009_auto_approval_modes'
+        '009_auto_approval_modes',
+        '010_playground_runs'
     ]);
 });
 
@@ -2513,7 +2580,7 @@ test('backup and restore scripts preserve the database state', async () => {
     restoredDb.close();
 
     assert.ok(commandCount >= 1);
-    assert.equal(migrationCount, 9);
+    assert.equal(migrationCount, 10);
 });
 
 test('exec key rotation preserves delayed execution payloads', async () => {

@@ -18,6 +18,7 @@ const { createApprovalsRouter } = require('./api/approvals');
 const { createRulesRouter } = require('./api/rules');
 const { createRulePacksRouter } = require('./api/rule-packs');
 const { createPolicyRouter } = require('./api/policy');
+const { createPlaygroundRouter } = require('./api/playground');
 const { createAuditRouter } = require('./api/audit');
 const { createCliRouter } = require('./api/cli');
 const { createMyApprovalPreferencesRouter } = require('./api/my-approval-preferences');
@@ -162,6 +163,7 @@ app.get('/api/health', (req, res) => {
 app.use('/api/commands', auth.requireAuth, createCommandsRouter(db, publishEvent, { onApproved: queueExecution }));
 app.use('/api/approvals', auth.requireAuth, createApprovalsRouter(db, publishEvent, { onApproved: queueExecution }));
 app.use('/api/policy', auth.requireAuth, createPolicyRouter(db));
+app.use('/api/playground', auth.requireAuth, createPlaygroundRouter(db, publishEvent));
 app.use('/api/cli', auth.requireAuth, createCliRouter(db, publishEvent, auth, { onApproved: queueExecution }));
 app.use('/api/my/approval-preferences', auth.requireUserSession, createMyApprovalPreferencesRouter(db));
 app.use('/api/my/tokens', auth.requireUserSession, createMyTokensRouter(db));

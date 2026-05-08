@@ -12,7 +12,7 @@ async function loginAdmin(page) {
     await page.getByTestId('login-password').fill('admin');
     await page.getByTestId('login-submit').click();
     await expect(page.getByTestId('nav-account')).toBeVisible();
-    await expect(page.locator('#submit-command-btn')).toBeEnabled();
+    await expect(page.getByTestId('nav-playground')).toBeVisible();
 }
 
 test('dashboard auth and primary navigation smoke', async ({ page }) => {
@@ -70,8 +70,16 @@ test('dashboard auth and primary navigation smoke', async ({ page }) => {
     await expect(page.locator('#auto-refresh-toggle')).toHaveCount(0);
     await expect(page.locator('#logout-btn')).toHaveCount(0);
     await expect(page.locator('#change-password-btn')).toHaveCount(0);
+    await expect(page.locator('#submit-command-btn')).toHaveCount(0);
     await expect(page.getByTestId('browser-notifications-toggle')).toHaveCount(0);
     await expect(page.getByTestId('topbar-live-status')).toBeVisible();
+    await openNav(page, 'nav-playground', 'Playground');
+    await expect(page.getByText('Command Playground')).toBeVisible();
+    await expect(page.locator('#playground-selected-title')).toHaveText('Dashboard Request');
+    await page.getByTestId('playground-run').click();
+    await expect(page.getByText('Playground run created')).toBeVisible();
+    await expect(page.locator('#playground-active-run')).toContainText(/Policy/i);
+    await expect(page.locator('#playground-recent-runs')).toContainText('Dashboard Request');
     await page.getByTestId('nav-account').click();
     await expect(page.locator('#page-title')).toHaveText('Account');
     await expect(page.getByTestId('account-session-summary')).toContainText('admin');
