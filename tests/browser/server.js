@@ -27,7 +27,8 @@ const child = spawn(process.execPath, ['server.js'], {
         NIYAM_EXEC_DATA_KEY: 'playwright-test-key',
         NIYAM_METRICS_TOKEN: 'playwright-metrics',
         NIYAM_PRODUCT_MODE: 'individual',
-        NIYAM_ENABLE_SELF_SIGNUP: 'false'
+        NIYAM_ENABLE_SELF_SIGNUP: 'false',
+        NIYAM_NATIVE_NOTIFICATIONS_DISABLED: 'true'
     },
     stdio: 'inherit'
 });

@@ -570,6 +570,40 @@ function validateAutoApprovalPreferencePayload(body) {
     };
 }
 
+function validateTokenNotificationPreferencePayload(body) {
+    const value = isPlainObject(body) ? body : {};
+    const errors = [];
+    const enabled = normalizeBooleanLike(value.approvalNotificationsEnabled);
+    if (enabled === null) {
+        errors.push('Approval notifications enabled must be a boolean or 0/1');
+    }
+
+    return {
+        valid: errors.length === 0,
+        errors,
+        value: {
+            approvalNotificationsEnabled: enabled === true
+        }
+    };
+}
+
+function validateNativeNotificationPreferencePayload(body) {
+    const value = isPlainObject(body) ? body : {};
+    const errors = [];
+    const enabled = normalizeBooleanLike(value.nativeNotificationsEnabled);
+    if (enabled === null) {
+        errors.push('Native notifications enabled must be a boolean or 0/1');
+    }
+
+    return {
+        valid: errors.length === 0,
+        errors,
+        value: {
+            nativeNotificationsEnabled: enabled === true
+        }
+    };
+}
+
 function validatePackActionBody(body) {
     const value = isPlainObject(body) ? body : {};
     const mode = value.mode === undefined ? 'install_if_missing' : value.mode;
@@ -654,7 +688,9 @@ module.exports = {
     validateCommandPayload,
     validateLoginBody,
     validateManagedTokenPayload,
+    validateNativeNotificationPreferencePayload,
     validateAutoApprovalPreferencePayload,
+    validateTokenNotificationPreferencePayload,
     validatePasswordChangePayload,
     validatePackActionBody,
     validateRulePayload,

@@ -201,6 +201,26 @@ CREATE TABLE IF NOT EXISTS cli_dispatches (
     FOREIGN KEY (command_id) REFERENCES commands(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS playground_runs (
+    id TEXT PRIMARY KEY,
+    scenario TEXT NOT NULL,
+    approval_mode TEXT NOT NULL,
+    command TEXT NOT NULL,
+    status TEXT NOT NULL,
+    route TEXT,
+    command_id TEXT,
+    dispatch_id TEXT,
+    requester TEXT,
+    requester_type TEXT,
+    safe_lifecycle INTEGER DEFAULT 1,
+    created_by TEXT,
+    metadata TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (command_id) REFERENCES commands(id) ON DELETE SET NULL,
+    FOREIGN KEY (dispatch_id) REFERENCES cli_dispatches(id) ON DELETE SET NULL
+);
+
 -- Create indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_commands_status ON commands(status);
 CREATE INDEX IF NOT EXISTS idx_commands_risk_level ON commands(risk_level);
@@ -227,3 +247,7 @@ CREATE INDEX IF NOT EXISTS idx_cli_dispatches_status ON cli_dispatches(status);
 CREATE INDEX IF NOT EXISTS idx_cli_dispatches_requester ON cli_dispatches(requester);
 CREATE INDEX IF NOT EXISTS idx_cli_dispatches_command_id ON cli_dispatches(command_id);
 CREATE INDEX IF NOT EXISTS idx_cli_dispatches_created_at ON cli_dispatches(created_at);
+CREATE INDEX IF NOT EXISTS idx_playground_runs_created_at ON playground_runs(created_at);
+CREATE INDEX IF NOT EXISTS idx_playground_runs_created_by ON playground_runs(created_by);
+CREATE INDEX IF NOT EXISTS idx_playground_runs_command_id ON playground_runs(command_id);
+CREATE INDEX IF NOT EXISTS idx_playground_runs_dispatch_id ON playground_runs(dispatch_id);

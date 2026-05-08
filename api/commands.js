@@ -7,6 +7,7 @@ const { addAuthDetails } = require('../services/auth-context');
 const { logAudit } = require('../services/audit-log');
 const { persistCommandSubmission, prepareCommandSubmission } = require('../services/command-submissions');
 const { shapeApprovalRecord, shapeCommandRecord } = require('../services/record-shaping');
+const { createTokensService } = require('../services/tokens');
 const { validateCommandPayload, validationError } = require('./validation');
 
 function createCommandsRouter(db, broadcast, hooks = {}) {
@@ -75,6 +76,7 @@ function createCommandsRouter(db, broadcast, hooks = {}) {
         }
 
         const shaped = shapeCommandRecord(cmd);
+        applyCommandNotificationPreferences(db, [shaped]);
         const approvals = db.prepare('SELECT * FROM approvals WHERE command_id = ? ORDER BY created_at ASC').all(req.params.id);
         shaped.approvals = approvals.map(shapeApprovalRecord);
         applyApprovalSummary(shaped, approvals);
@@ -110,6 +112,7 @@ function createCommandsRouter(db, broadcast, hooks = {}) {
         params.push(limitVal, offsetVal);
 
         const commands = db.prepare(query).all(...params).map(shapeCommandRecord);
+        applyCommandNotificationPreferences(db, commands);
         enrichCommandsWithApprovals(db, commands);
 
         let countQuery = 'SELECT COUNT(*) as total FROM commands WHERE 1=1';
@@ -155,6 +158,30 @@ function createCommandsRouter(db, broadcast, hooks = {}) {
     });
 
     return router;
+}
+
+function applyCommandNotificationPreferences(db, commands) {
+    if (!Array.isArray(commands) || commands.length === 0) {
+        return;
+    }
+
+    const tokens = createTokensService(db);
+    const tokenPreferenceCache = new Map();
+    for (const command of commands) {
+        const authenticationContext = command.authenticationContext || {};
+        if (authenticationContext.mode !== 'managed_token' || !authenticationContext.credentialId) {
+            command.approvalNotificationsEnabled = true;
+            command.approvalNotificationPreferenceScope = 'session';
+            continue;
+        }
+
+        if (!tokenPreferenceCache.has(authenticationContext.credentialId)) {
+            const token = tokens.getTokenById(authenticationContext.credentialId);
+            tokenPreferenceCache.set(authenticationContext.credentialId, token ? token.approvalNotificationsEnabled : true);
+        }
+        command.approvalNotificationsEnabled = tokenPreferenceCache.get(authenticationContext.credentialId);
+        command.approvalNotificationPreferenceScope = 'token';
+    }
 }
 
 module.exports = {

@@ -17,21 +17,54 @@ const state = {
     wsReconnectTimer: null,
     pendingCount: 0,
     currentPageRenderer: null,
-    refreshInterval: null,
+    realtimeRefreshTimer: null,
     timerInterval: null,
-    autoRefreshEnabled: localStorage.getItem('niyam.autoRefresh') !== 'off',
     previewTimer: null,
-    previewSequence: 0
+    previewSequence: 0,
+    pendingBadgeRefreshHooksInitialized: false,
+    browserNotificationIds: new Set(),
+    browserNotificationRegistrationPromise: null
 };
 
 // API Base URL
 const API_BASE = '/api';
 
-// Auto-refresh interval (ms)
-const AUTO_REFRESH_MS = 10000;
+const REALTIME_REFRESH_DEBOUNCE_MS = 150;
+const BROWSER_NOTIFICATIONS_STORAGE_KEY = 'niyam.browserNotifications.enabled';
+const BROWSER_NOTIFICATIONS_ENABLED_AT_KEY = 'niyam.browserNotifications.enabledAt';
+const BROWSER_NOTIFICATIONS_SEEN_KEY = 'niyam.browserNotifications.seenPendingIds';
+const BROWSER_NOTIFICATIONS_DELIVERY_KEY = 'niyam.browserNotifications.deliveryMode';
+const BROWSER_NOTIFICATION_DELIVERY_LABELS = {
+    'service-worker': 'service-worker',
+    'service-worker-native': 'service-worker + system fallback',
+    'browser-api': 'browser-api',
+    'browser-api-native': 'browser-api + system fallback',
+    'native-fallback': 'system fallback',
+    unavailable: 'unavailable'
+};
+const REALTIME_PAGE_EVENT_TYPES = new Set([
+    'command_submitted',
+    'command_auto_approved',
+    'command_approved',
+    'approval_granted',
+    'command_rejected',
+    'command_executing',
+    'command_completed',
+    'command_failed',
+    'command_timeout',
+    'command_cancelled',
+    'command_killed',
+    'cli_dispatch_created',
+    'cli_dispatch_linked_command',
+    'cli_dispatch_updated',
+    'rule_created',
+    'rule_updated',
+    'rule_deleted'
+]);
 
 const ICONS = {
     dashboard: '<svg viewBox="0 0 24 24"><path d="M4 19h16M7 15v-4M12 15V7M17 15v-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+    playground: '<svg viewBox="0 0 24 24"><path d="M5 6h14M5 12h9M5 18h14m-3-9 3 3-3 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     workspace: '<svg viewBox="0 0 24 24"><path d="M4 6h16v12H4zM8 10h8M8 14h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     pending: '<svg viewBox="0 0 24 24"><path d="M8 4h8M8 20h8M8 4c0 4 8 4 8 8s-8 4-8 8M16 4c0 4-8 4-8 8s8 4 8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     history: '<svg viewBox="0 0 24 24"><path d="M8 5h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8a3 3 0 1 1 0-6h10M8 5a3 3 0 1 0 0 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -39,13 +72,14 @@ const ICONS = {
     rules: '<svg viewBox="0 0 24 24"><path d="M9 4h6l1 2h3v14H5V6h3l1-2Zm0 6h6M9 12h6M9 16h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     audit: '<svg viewBox="0 0 24 24"><path d="M10.5 18a7.5 7.5 0 1 1 5.3-2.2L20 20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     activity: '<svg viewBox="0 0 24 24"><path d="M5 12h4l2-4 3 8 2-4h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    account: '<svg viewBox="0 0 24 24"><path d="M12 13a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 8a7 7 0 0 1 14 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     done: '<svg viewBox="0 0 24 24"><path d="m5 12 4.2 4L19 6.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     blocked: '<svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7 7 17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
     package: '<svg viewBox="0 0 24 24"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Zm0 0v9m8-4.5-8 4.5-8-4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 };
 
-const ALL_PAGES = ['dashboard', 'workspace', 'pending', 'history', 'rules', 'audit', 'users'];
-const DEFAULT_USER_PAGES = ['dashboard', 'workspace', 'pending', 'history'];
+const ALL_PAGES = ['dashboard', 'playground', 'workspace', 'pending', 'history', 'rules', 'audit', 'users', 'account'];
+const DEFAULT_USER_PAGES = ['dashboard', 'playground', 'workspace', 'pending', 'history', 'account'];
 
 function renderUiIcon(name, className = '') {
     const svg = ICONS[name] || ICONS.activity;
@@ -76,7 +110,6 @@ async function bootstrapApp() {
     await loadAuthConfig();
     updateModeLabels();
     initAuthUi();
-    updateAutoRefreshButton();
 
     const restored = await restoreSession();
     if (!restored) {
@@ -115,8 +148,7 @@ function initAuthUi() {
             submitSignupRequest();
         }
     });
-    document.getElementById('logout-btn').addEventListener('click', logout);
-    document.getElementById('change-password-btn').addEventListener('click', openPasswordModal);
+    document.addEventListener('click', handleAccountActionClick);
     document.getElementById('password-modal-close').addEventListener('click', closePasswordModal);
     document.getElementById('password-cancel-btn').addEventListener('click', closePasswordModal);
     document.getElementById('password-save-btn').addEventListener('click', submitPasswordChange);
@@ -125,6 +157,27 @@ function initAuthUi() {
             submitPasswordChange();
         }
     });
+    hydrateBrowserNotificationIds();
+    updateBrowserNotificationToggle();
+    registerBrowserNotificationServiceWorker();
+    initPendingBadgeRefreshHooks();
+}
+
+function handleAccountActionClick(event) {
+    const actionTarget = event.target.closest('[data-account-action]');
+    if (!actionTarget) {
+        return;
+    }
+
+    event.preventDefault();
+    const action = actionTarget.dataset.accountAction;
+    if (action === 'logout') {
+        logout();
+    } else if (action === 'change-password') {
+        openPasswordModal();
+    } else if (action === 'toggle-notifications') {
+        toggleBrowserNotifications();
+    }
 }
 
 async function loadAuthConfig() {
@@ -198,6 +251,10 @@ function enterAuthenticatedState(principal, authentication = null) {
     hideLoginOverlay();
     updateSessionUi();
     updateNavigationForPrincipal();
+    updateBrowserNotificationToggle();
+    if (areBrowserNotificationsEnabled()) {
+        syncNativeNotificationPreference(shouldEnableNativeNotificationFallback(), { silent: true });
+    }
 
     if (!state.initialized) {
         initNavigation();
@@ -223,7 +280,11 @@ function enterAuthenticatedState(principal, authentication = null) {
         navigateTo(state.currentPage || 'dashboard');
     }
 
-    document.getElementById('cmd-requester').value = principal.identifier;
+    const requesterInput = document.getElementById('cmd-requester');
+    if (requesterInput) {
+        requesterInput.value = principal.identifier;
+    }
+    updatePendingBadge();
 
     if (!state.ws || state.ws.readyState === WebSocket.CLOSED) {
         initWebSocket();
@@ -234,6 +295,7 @@ function enterUnauthenticatedState(message) {
     state.principal = null;
     state.authentication = null;
     updateSessionUi();
+    updateBrowserNotificationToggle();
     updateNavigationForPrincipal();
     closeApprovalModal();
     closeModal();
@@ -243,23 +305,24 @@ function enterUnauthenticatedState(message) {
 }
 
 function updateSessionUi() {
-    const pill = document.getElementById('session-pill');
-    const logoutBtn = document.getElementById('logout-btn');
-    const changePasswordBtn = document.getElementById('change-password-btn');
     const submitBtn = document.getElementById('submit-command-btn');
 
     if (!state.principal) {
-        pill.textContent = 'Not signed in';
-        logoutBtn.style.display = 'none';
-        changePasswordBtn.style.display = 'none';
-        submitBtn.disabled = true;
+        document.querySelectorAll('[data-account-session-label]').forEach(element => {
+            element.textContent = 'Not signed in';
+        });
+        if (submitBtn) {
+            submitBtn.disabled = true;
+        }
         return;
     }
 
-    pill.textContent = describePrincipal(state.principal);
-    logoutBtn.style.display = 'inline-flex';
-    changePasswordBtn.style.display = state.principal.type === 'user' ? 'inline-flex' : 'none';
-    submitBtn.disabled = false;
+    document.querySelectorAll('[data-account-session-label]').forEach(element => {
+        element.textContent = describePrincipal(state.principal);
+    });
+    if (submitBtn) {
+        submitBtn.disabled = false;
+    }
 }
 
 function showLoginOverlay(message) {
@@ -466,13 +529,15 @@ function navigateTo(page) {
     // Update page title
     const titles = {
         dashboard: 'Dashboard',
+        playground: 'Playground',
         workspace: 'Workspace',
         pending: 'Pending Approvals',
         history: 'Activity',
         dispatches: 'Activity',
         rules: 'Policy Rules',
         audit: 'Audit Log',
-        users: state.authConfig.productMode === 'individual' ? 'Tokens' : 'Users'
+        users: state.authConfig.productMode === 'individual' ? 'Tokens' : 'Users',
+        account: 'Account'
     };
     document.getElementById('page-title').textContent = titles[page] || page;
     
@@ -482,6 +547,7 @@ function navigateTo(page) {
     
     switch (page) {
         case 'dashboard': renderDashboard(container); break;
+        case 'playground': renderPlayground(container); break;
         case 'workspace': renderWorkspace(container); break;
         case 'pending': renderPending(container); break;
         case 'history': renderHistory(container); break;
@@ -489,34 +555,30 @@ function navigateTo(page) {
         case 'rules': renderRules(container); break;
         case 'audit': renderAudit(container); break;
         case 'users': renderUsers(container); break;
+        case 'account': renderAccount(container); break;
     }
     
-    // Start auto-refresh
-    startAutoRefresh();
+    updatePendingBadge();
+    startRealtimeUpdates();
 }
 
 // ═══════════════════════════════════════════
-// Auto-Refresh
+// Realtime Updates
 // ═══════════════════════════════════════════
-function startAutoRefresh() {
-    if (state.refreshInterval) clearInterval(state.refreshInterval);
+function startRealtimeUpdates() {
     if (state.timerInterval) clearInterval(state.timerInterval);
-
-    if (!state.autoRefreshEnabled) {
-        return;
-    }
-
-    state.refreshInterval = setInterval(() => {
-        silentlyRefreshCurrentPage();
-    }, AUTO_REFRESH_MS);
     startTimerUpdates();
+
+    if (!state.ws || state.ws.readyState === WebSocket.CLOSED) {
+        initWebSocket();
+    }
 }
 
 function stopRealtime() {
-    if (state.refreshInterval) clearInterval(state.refreshInterval);
+    if (state.realtimeRefreshTimer) clearTimeout(state.realtimeRefreshTimer);
     if (state.timerInterval) clearInterval(state.timerInterval);
     if (state.wsReconnectTimer) clearTimeout(state.wsReconnectTimer);
-    state.refreshInterval = null;
+    state.realtimeRefreshTimer = null;
     state.timerInterval = null;
     state.wsReconnectTimer = null;
     if (state.ws) {
@@ -525,52 +587,69 @@ function stopRealtime() {
     }
 }
 
-function toggleAutoRefresh() {
-    state.autoRefreshEnabled = !state.autoRefreshEnabled;
-    localStorage.setItem('niyam.autoRefresh', state.autoRefreshEnabled ? 'on' : 'off');
-    updateAutoRefreshButton();
-
-    if (state.autoRefreshEnabled) {
-        startAutoRefresh();
-        showNotification('Refresh enabled', 'success');
-    } else {
-        if (state.refreshInterval) clearInterval(state.refreshInterval);
-        if (state.timerInterval) clearInterval(state.timerInterval);
-        state.refreshInterval = null;
-        state.timerInterval = null;
-        showNotification('Refresh paused', 'warning');
+function scheduleRealtimePageRefresh() {
+    if (state.realtimeRefreshTimer) {
+        clearTimeout(state.realtimeRefreshTimer);
     }
+
+    state.realtimeRefreshTimer = setTimeout(() => {
+        state.realtimeRefreshTimer = null;
+        refreshCurrentPageData();
+    }, REALTIME_REFRESH_DEBOUNCE_MS);
 }
 
-function updateAutoRefreshButton() {
-    const btn = document.getElementById('auto-refresh-toggle');
-    if (!btn) return;
-    btn.innerHTML = `${renderUiIcon('activity', 'btn-icon')}Refresh: ${state.autoRefreshEnabled ? 'ON' : 'OFF'}`;
-}
+async function refreshCurrentPageData() {
+    if (!state.principal || !state.currentPage) {
+        return;
+    }
 
-function silentlyRefreshCurrentPage() {
-    const container = document.getElementById('page-container');
-    if (!container || !state.currentPage) return;
-    
-    // Don't refresh if modal is open
+    updatePendingBadge();
+
     const submitModal = document.getElementById('submit-modal');
     const approvalModal = document.getElementById('approval-modal');
     if ((submitModal && submitModal.style.display === 'flex') ||
         (approvalModal && approvalModal.style.display === 'flex')) {
         return;
     }
-    
-    switch (state.currentPage) {
-        case 'dashboard': renderDashboard(container); break;
-        case 'workspace': renderWorkspace(container); break;
-        case 'pending': renderPending(container); break;
-        case 'history': renderHistory(container); break;
-        case 'dispatches': renderHistory(container); break;
-        case 'rules': renderRules(container); break;
-        case 'audit': renderAudit(container); break;
-        case 'users': renderUsers(container); break;
+
+    try {
+        switch (state.currentPage) {
+            case 'dashboard':
+                await Promise.all([
+                    loadDashboardStats(),
+                    loadRecentActivity(),
+                    loadPendingPreview()
+                ]);
+                break;
+            case 'playground':
+                await refreshPlaygroundData();
+                break;
+            case 'workspace':
+                await loadWorkspaceDetails();
+                break;
+            case 'pending':
+                await loadPendingPage();
+                break;
+            case 'history':
+            case 'dispatches':
+                await loadHistoryPage();
+                break;
+            case 'rules':
+                await loadRulesPage();
+                break;
+            case 'audit':
+                await Promise.all([
+                    loadAuditStats(),
+                    loadAuditLog()
+                ]);
+                break;
+            case 'users':
+                await loadUsersPage();
+                break;
+        }
+    } catch (error) {
+        // Page-specific loaders already render their own error states.
     }
-    updatePendingBadge();
 }
 
 // ═══════════════════════════════════════════
@@ -720,6 +799,9 @@ function initWebSocket() {
 
 function updateConnectionStatus(connected) {
     const statusEl = document.getElementById('ws-status');
+    if (!statusEl) {
+        return;
+    }
     const dot = statusEl.querySelector('.status-dot');
     const text = statusEl.querySelector('.status-text');
     
@@ -733,17 +815,24 @@ function updateConnectionStatus(connected) {
 }
 
 function handleWebSocketMessage(msg) {
-    const { type, data } = msg;
+    const { type, data = {} } = msg;
     const commandLine = buildCommandLineDisplay(data);
     
     switch (type) {
         case 'command_submitted':
             updatePendingBadge();
             showNotification(`New command: ${commandLine || data.command}`, 'info');
+            showBrowserApprovalNotification(data);
+            break;
+        case 'command_auto_approved':
+            updatePendingBadge();
+            showNotification(`Command auto-approved: ${commandLine || data.command}`, 'success');
+            showBrowserApprovalStatusNotification('command_auto_approved', data);
             break;
         case 'command_approved':
             updatePendingBadge();
             showNotification(`Command approved: ${commandLine || data.command}`, 'success');
+            showBrowserApprovalStatusNotification('command_approved', data);
             break;
         case 'command_rejected':
             updatePendingBadge();
@@ -760,22 +849,23 @@ function handleWebSocketMessage(msg) {
             showNotification(`Command timed out`, 'warning');
             break;
         case 'approval_granted':
+            updatePendingBadge();
             showNotification(`Approval granted (${data.approvals}/${data.required})`, 'info');
+            showBrowserApprovalStatusNotification('approval_granted', data);
             break;
     }
     
-    // Refresh current page
-    if (state.currentPage) {
-        navigateTo(state.currentPage);
+    if (REALTIME_PAGE_EVENT_TYPES.has(type)) {
+        scheduleRealtimePageRefresh();
     }
 }
 
 function updatePendingBadge() {
     if (!state.principal) {
-        return;
+        return Promise.resolve();
     }
 
-    apiFetch('/commands?status=pending&limit=0')
+    return apiFetch('/commands?status=pending&limit=0')
         .then(r => r.json())
         .then(data => {
             const count = data.total || 0;
@@ -787,12 +877,570 @@ function updatePendingBadge() {
                 badge.style.display = 'none';
             }
             state.pendingCount = count;
+            if (count > 0) {
+                syncPendingApprovalNotifications();
+            }
         })
         .catch(() => {});
 }
 
 // ═══════════════════════════════════════════
-// Notifications (in-page, not browser API)
+// Browser Notifications
+// ═══════════════════════════════════════════
+function initPendingBadgeRefreshHooks() {
+    if (state.pendingBadgeRefreshHooksInitialized) {
+        return;
+    }
+
+    state.pendingBadgeRefreshHooksInitialized = true;
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+            updatePendingBadge();
+        }
+    });
+    window.addEventListener('focus', () => {
+        updatePendingBadge();
+    });
+}
+
+function getBrowserNotificationApi() {
+    return typeof window !== 'undefined' && 'Notification' in window ? window.Notification : null;
+}
+
+function getStoredBrowserNotificationsEnabled() {
+    try {
+        return localStorage.getItem(BROWSER_NOTIFICATIONS_STORAGE_KEY) === 'true';
+    } catch (error) {
+        return false;
+    }
+}
+
+function setStoredBrowserNotificationsEnabled(enabled) {
+    try {
+        localStorage.setItem(BROWSER_NOTIFICATIONS_STORAGE_KEY, enabled ? 'true' : 'false');
+        if (enabled) {
+            localStorage.setItem(BROWSER_NOTIFICATIONS_ENABLED_AT_KEY, String(Date.now()));
+        }
+    } catch (error) {
+        // Ignore storage failures; permission still controls browser notification delivery.
+    }
+}
+
+function getBrowserNotificationsEnabledAt() {
+    try {
+        const enabledAt = Number.parseInt(localStorage.getItem(BROWSER_NOTIFICATIONS_ENABLED_AT_KEY), 10);
+        return Number.isFinite(enabledAt) ? enabledAt : 0;
+    } catch (error) {
+        return 0;
+    }
+}
+
+function getStoredBrowserNotificationDelivery() {
+    try {
+        const delivery = localStorage.getItem(BROWSER_NOTIFICATIONS_DELIVERY_KEY);
+        return BROWSER_NOTIFICATION_DELIVERY_LABELS[delivery] ? delivery : 'unavailable';
+    } catch (error) {
+        return 'unavailable';
+    }
+}
+
+function setStoredBrowserNotificationDelivery(delivery) {
+    const normalized = BROWSER_NOTIFICATION_DELIVERY_LABELS[delivery] ? delivery : 'unavailable';
+    try {
+        localStorage.setItem(BROWSER_NOTIFICATIONS_DELIVERY_KEY, normalized);
+    } catch (error) {
+        // Ignore storage failures; the current toggle render still uses the normalized value.
+    }
+    updateBrowserNotificationToggle();
+    return normalized;
+}
+
+function shouldEnableNativeNotificationFallback() {
+    const delivery = getStoredBrowserNotificationDelivery();
+    return delivery === 'native-fallback' ||
+        delivery === 'service-worker-native' ||
+        delivery === 'browser-api-native';
+}
+
+function resolveCombinedNotificationDelivery(browserDelivery, nativeFallbackSent) {
+    if (!nativeFallbackSent) {
+        return browserDelivery;
+    }
+    if (browserDelivery === 'service-worker') {
+        return 'service-worker-native';
+    }
+    if (browserDelivery === 'browser-api') {
+        return 'browser-api-native';
+    }
+    return browserDelivery;
+}
+
+function rememberBrowserNotificationId(commandId, scope = 'pending') {
+    if (!commandId) {
+        return;
+    }
+
+    const key = buildBrowserNotificationKey(scope, commandId);
+    state.browserNotificationIds.add(key);
+    try {
+        const ids = JSON.parse(localStorage.getItem(BROWSER_NOTIFICATIONS_SEEN_KEY) || '[]');
+        const merged = [key, ...ids.filter(id => id !== key)].slice(0, 120);
+        localStorage.setItem(BROWSER_NOTIFICATIONS_SEEN_KEY, JSON.stringify(merged));
+    } catch (error) {
+        // Session memory still prevents duplicate notifications if local storage fails.
+    }
+}
+
+function hydrateBrowserNotificationIds() {
+    try {
+        const ids = JSON.parse(localStorage.getItem(BROWSER_NOTIFICATIONS_SEEN_KEY) || '[]');
+        if (Array.isArray(ids)) {
+            ids.filter(Boolean).forEach(id => state.browserNotificationIds.add(id));
+        }
+    } catch (error) {
+        // Ignore malformed local state.
+    }
+}
+
+function getBrowserNotificationPermission() {
+    const NotificationApi = getBrowserNotificationApi();
+    return NotificationApi ? NotificationApi.permission || 'default' : 'unsupported';
+}
+
+function supportsServiceWorkerNotifications() {
+    return typeof navigator !== 'undefined' &&
+        'serviceWorker' in navigator &&
+        typeof navigator.serviceWorker.register === 'function';
+}
+
+function registerBrowserNotificationServiceWorker() {
+    if (!supportsServiceWorkerNotifications()) {
+        return Promise.resolve(null);
+    }
+
+    if (!state.browserNotificationRegistrationPromise) {
+        state.browserNotificationRegistrationPromise = navigator.serviceWorker
+            .register('/notification-sw.js')
+            .then(registration => registration)
+            .catch(() => null);
+    }
+
+    return state.browserNotificationRegistrationPromise;
+}
+
+async function getBrowserNotificationRegistration() {
+    const registered = await registerBrowserNotificationServiceWorker();
+    if (registered && typeof registered.showNotification === 'function') {
+        return registered;
+    }
+
+    if (typeof navigator !== 'undefined' &&
+        navigator.serviceWorker &&
+        navigator.serviceWorker.ready &&
+        typeof navigator.serviceWorker.ready.then === 'function') {
+        try {
+            const ready = await navigator.serviceWorker.ready;
+            if (ready && typeof ready.showNotification === 'function') {
+                return ready;
+            }
+        } catch (error) {
+            return null;
+        }
+    }
+
+    return null;
+}
+
+function areBrowserNotificationsEnabled() {
+    return Boolean(getBrowserNotificationApi()) &&
+        getBrowserNotificationPermission() === 'granted' &&
+        getStoredBrowserNotificationsEnabled();
+}
+
+async function requestBrowserNotificationPermission() {
+    const NotificationApi = getBrowserNotificationApi();
+    if (!NotificationApi || typeof NotificationApi.requestPermission !== 'function') {
+        return 'unsupported';
+    }
+
+    try {
+        const result = await Promise.resolve(NotificationApi.requestPermission());
+        return result || getBrowserNotificationPermission();
+    } catch (error) {
+        return getBrowserNotificationPermission();
+    }
+}
+
+async function toggleBrowserNotifications() {
+    const permission = getBrowserNotificationPermission();
+
+    if (permission === 'unsupported') {
+        setStoredBrowserNotificationsEnabled(false);
+        setStoredBrowserNotificationDelivery('unavailable');
+        updateBrowserNotificationToggle();
+        await syncNativeNotificationPreference(false, { silent: true });
+        showNotification('Browser notifications are not supported here.', 'warning');
+        return;
+    }
+
+    if (areBrowserNotificationsEnabled()) {
+        setStoredBrowserNotificationsEnabled(false);
+        setStoredBrowserNotificationDelivery('unavailable');
+        updateBrowserNotificationToggle();
+        await syncNativeNotificationPreference(false);
+        showNotification('Notification setting saved: off', 'info');
+        return;
+    }
+
+    if (permission === 'denied') {
+        setStoredBrowserNotificationsEnabled(false);
+        setStoredBrowserNotificationDelivery('unavailable');
+        updateBrowserNotificationToggle();
+        await syncNativeNotificationPreference(false, { silent: true });
+        showNotification('Browser notifications are blocked. Enable them in browser site settings.', 'warning');
+        return;
+    }
+
+    const nextPermission = permission === 'granted'
+        ? permission
+        : await requestBrowserNotificationPermission();
+
+    if (nextPermission === 'granted') {
+        setStoredBrowserNotificationsEnabled(true);
+        updateBrowserNotificationToggle();
+        const browserDelivery = await sendBrowserNotification('Niyam notifications enabled', {
+            body: 'New pending approval requests will notify this browser.',
+            tag: 'niyam-notifications-enabled'
+        }, 'pending', { suppressWarnings: true });
+
+        if (browserDelivery.sent) {
+            await syncNativeNotificationPreference(true, { silent: true });
+            const nativeTestSent = await sendNativeNotificationTest();
+            setStoredBrowserNotificationDelivery(resolveCombinedNotificationDelivery(browserDelivery.delivery, nativeTestSent));
+            showNotification(
+                nativeTestSent
+                    ? 'Notification setting saved. Test browser notification sent; system fallback enabled.'
+                    : 'Notification setting saved. Test browser notification sent.',
+                'success'
+            );
+            await seedPendingApprovalNotificationState();
+            return;
+        }
+
+        await syncNativeNotificationPreference(true);
+        const nativeTestSent = await sendNativeNotificationTest();
+        if (nativeTestSent) {
+            setStoredBrowserNotificationDelivery('native-fallback');
+            showNotification('Notification setting saved. Browser notification unavailable; system fallback sent.', 'warning');
+            await seedPendingApprovalNotificationState();
+            return;
+        }
+
+        setStoredBrowserNotificationsEnabled(false);
+        setStoredBrowserNotificationDelivery('unavailable');
+        await syncNativeNotificationPreference(false, { silent: true });
+        showNotification('Browser accepted permission but did not display notifications.', 'warning');
+        return;
+    }
+
+    setStoredBrowserNotificationsEnabled(false);
+    setStoredBrowserNotificationDelivery('unavailable');
+    updateBrowserNotificationToggle();
+    await syncNativeNotificationPreference(false, { silent: true });
+    showNotification('Browser notifications were not allowed.', 'warning');
+}
+
+async function syncNativeNotificationPreference(enabled, options = {}) {
+    if (!state.principal || !state.principal.roles || !state.principal.roles.includes('admin')) {
+        return false;
+    }
+
+    try {
+        const response = await apiFetch('/notifications/preferences', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nativeNotificationsEnabled: enabled })
+        });
+        if (!response.ok && !options.silent) {
+            showNotification('Could not update system notification setting.', 'warning');
+        }
+        return response.ok;
+    } catch (error) {
+        if (!options.silent) {
+            showNotification('Could not update system notification setting.', 'warning');
+        }
+        return false;
+    }
+}
+
+async function sendNativeNotificationTest() {
+    try {
+        const response = await apiFetch('/notifications/test', {
+            method: 'POST'
+        });
+        return response.ok;
+    } catch (error) {
+        // Browser-side notifications may still work; the in-page state should not fail the toggle.
+        return false;
+    }
+}
+
+function updateBrowserNotificationToggle() {
+    const buttons = document.querySelectorAll('.browser-notifications-toggle');
+    if (buttons.length === 0) {
+        return;
+    }
+
+    const permission = getBrowserNotificationPermission();
+    const enabled = areBrowserNotificationsEnabled();
+    const delivery = enabled ? getStoredBrowserNotificationDelivery() : 'unavailable';
+    const deliveryLabel = BROWSER_NOTIFICATION_DELIVERY_LABELS[delivery] || 'unavailable';
+    let text = enabled ? 'Notify: On' : 'Notify: Off';
+    let tooltip = enabled
+        ? `Notifications are enabled. Permission: ${permission}. Delivery: ${deliveryLabel}.`
+        : `Enable approval notifications. Permission: ${permission}. Delivery: ${deliveryLabel}.`;
+    let stateClass = enabled ? 'is-on' : '';
+
+    if (permission === 'unsupported') {
+        text = 'Notify: Unsupported';
+        tooltip = `This browser does not support desktop notifications. Permission: ${permission}. Delivery: unavailable.`;
+        stateClass = 'is-unsupported';
+    } else if (permission === 'denied') {
+        text = 'Notify: Blocked';
+        tooltip = `Browser notifications are blocked in site settings. Permission: ${permission}. Delivery: unavailable.`;
+        stateClass = 'is-blocked';
+    }
+
+    buttons.forEach(button => {
+        const label = button.querySelector('[data-browser-notifications-label]');
+        if (label) {
+            label.textContent = text;
+        }
+        button.classList.toggle('is-on', stateClass === 'is-on');
+        button.classList.toggle('is-blocked', stateClass === 'is-blocked');
+        button.classList.toggle('is-unsupported', stateClass === 'is-unsupported');
+        button.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+        button.setAttribute('data-tooltip', tooltip);
+    });
+}
+
+async function seedPendingApprovalNotificationState() {
+    return syncPendingApprovalNotifications({ seedOnly: true });
+}
+
+async function syncPendingApprovalNotifications(options = {}) {
+    if (!state.principal || !areBrowserNotificationsEnabled()) {
+        return;
+    }
+
+    try {
+        const response = await apiFetch('/commands?status=pending&limit=20');
+        if (!response.ok) {
+            return;
+        }
+        const result = await response.json();
+        const commands = Array.isArray(result.commands) ? result.commands : [];
+        const enabledAt = getBrowserNotificationsEnabledAt();
+
+        for (const command of commands) {
+            const createdAt = new Date(command.created_at || command.createdAt || 0).getTime();
+            const commandData = {
+                ...command,
+                riskLevel: command.riskLevel || command.risk_level,
+                timeoutAt: command.timeoutAt || command.timeout_at
+            };
+
+            if (options.seedOnly || (Number.isFinite(createdAt) && createdAt < enabledAt)) {
+                rememberBrowserNotificationId(commandData.id, 'pending');
+                continue;
+            }
+
+            await showBrowserApprovalNotification(commandData);
+        }
+    } catch (error) {
+        // Notification catch-up should never interrupt the dashboard.
+    }
+}
+
+async function sendBrowserNotification(title, options = {}, targetPage = null, sendOptions = {}) {
+    const NotificationApi = getBrowserNotificationApi();
+    if (!NotificationApi || getBrowserNotificationPermission() !== 'granted') {
+        return { sent: false, delivery: 'unavailable', reason: 'permission' };
+    }
+
+    const targetHash = targetPage ? `#${targetPage}` : null;
+    const notificationOptions = {
+        ...options,
+        data: {
+            ...(options.data || {}),
+            targetHash,
+            url: targetHash ? `${window.location.origin}/${targetHash}` : window.location.href
+        }
+    };
+
+    const registration = await getBrowserNotificationRegistration();
+    if (registration) {
+        try {
+            await registration.showNotification(title, notificationOptions);
+            return { sent: true, delivery: 'service-worker' };
+        } catch (error) {
+            // Fall through to the direct browser API below.
+        }
+    }
+
+    try {
+        const notification = new NotificationApi(title, notificationOptions);
+        if (targetPage) {
+            notification.onclick = () => {
+                focusAndNavigateForBrowserNotification(targetPage);
+                if (typeof notification.close === 'function') {
+                    notification.close();
+                }
+            };
+        }
+        return { sent: true, delivery: 'browser-api', notification };
+    } catch (error) {
+        if (!sendOptions.suppressWarnings) {
+            showNotification('Browser accepted permission but did not display notifications.', 'warning');
+        }
+        return { sent: false, delivery: 'unavailable', reason: 'display_failed' };
+    }
+}
+
+function focusAndNavigateForBrowserNotification(page) {
+    if (typeof window.focus === 'function') {
+        window.focus();
+    }
+    if (state.principal && getAllowedPages(state.principal).includes(page)) {
+        navigateTo(page);
+    } else {
+        window.location.hash = page;
+    }
+}
+
+async function showBrowserApprovalNotification(data = {}) {
+    if (!shouldShowBrowserApprovalNotification(data)) {
+        return false;
+    }
+
+    const commandLine = truncateNotificationText(buildCommandLineDisplay(data) || data.command || 'Command awaiting review', 120);
+    const riskLevel = data.riskLevel || data.risk_level || 'Risk pending';
+    const requester = data.requester || 'unknown requester';
+
+    const delivery = await sendBrowserNotification('Niyam approval needed', {
+        body: `${riskLevel}: ${commandLine} from ${requester}`,
+        tag: data.id ? `niyam-approval-${data.id}` : undefined,
+        requireInteraction: true
+    }, 'pending', { suppressWarnings: true });
+
+    if (!delivery.sent) {
+        return false;
+    }
+
+    setStoredBrowserNotificationDelivery(delivery.delivery);
+    rememberBrowserNotificationId(data.id, 'pending');
+    return true;
+}
+
+async function showBrowserApprovalStatusNotification(eventType, data = {}) {
+    if (!areBrowserNotificationsEnabled() || !data.id) {
+        return false;
+    }
+
+    const notificationKey = buildBrowserNotificationKey(eventType, data.id);
+    if (state.browserNotificationIds.has(notificationKey)) {
+        return false;
+    }
+
+    const commandData = await resolveBrowserNotificationCommandData(data);
+    if (!commandData || commandData.approvalNotificationsEnabled === false) {
+        rememberBrowserNotificationId(data.id, eventType);
+        return false;
+    }
+
+    const commandLine = truncateNotificationText(buildCommandLineDisplay(commandData) || commandData.command || 'Command approval updated', 120);
+    const requester = commandData.requester || 'unknown requester';
+    const riskLevel = commandData.riskLevel || commandData.risk_level || 'Risk pending';
+    const title = eventType === 'approval_granted'
+        ? 'Niyam approval progress'
+        : 'Niyam approval recorded';
+
+    const targetPage = eventType === 'approval_granted' ? 'pending' : 'history';
+    const delivery = await sendBrowserNotification(title, {
+        body: `${riskLevel}: ${commandLine} for ${requester}`,
+        tag: `niyam-${eventType}-${data.id}`,
+        requireInteraction: eventType !== 'approval_granted'
+    }, targetPage, { suppressWarnings: true });
+
+    if (!delivery.sent) {
+        return false;
+    }
+
+    setStoredBrowserNotificationDelivery(delivery.delivery);
+    rememberBrowserNotificationId(data.id, eventType);
+    return true;
+}
+
+async function resolveBrowserNotificationCommandData(data = {}) {
+    if (data.approvalNotificationsEnabled !== undefined || data.authenticationContext || data.requester || data.riskLevel || data.risk_level) {
+        return data;
+    }
+
+    try {
+        const response = await apiFetch(`/commands/${encodeURIComponent(data.id)}`);
+        if (!response.ok) {
+            return data;
+        }
+        const command = await response.json();
+        return {
+            ...command,
+            riskLevel: command.riskLevel || command.risk_level,
+            timeoutAt: command.timeoutAt || command.timeout_at
+        };
+    } catch (error) {
+        return data;
+    }
+}
+
+function shouldShowBrowserApprovalNotification(data = {}) {
+    if (!areBrowserNotificationsEnabled()) {
+        return false;
+    }
+    if (!data.id ||
+        state.browserNotificationIds.has(data.id) ||
+        state.browserNotificationIds.has(buildBrowserNotificationKey('pending', data.id))) {
+        return false;
+    }
+    if (data.approvalNotificationsEnabled === false) {
+        rememberBrowserNotificationId(data.id, 'pending');
+        return false;
+    }
+    if (data.status && data.status !== 'pending') {
+        return false;
+    }
+    if (data.autoApproved) {
+        return false;
+    }
+    if (['policy_auto', 'auto_agent_approved'].includes(data.approvalMode)) {
+        return false;
+    }
+    return true;
+}
+
+function buildBrowserNotificationKey(scope, commandId) {
+    return `${scope}:${commandId}`;
+}
+
+function truncateNotificationText(value, maxLength) {
+    const text = String(value || '').trim();
+    if (text.length <= maxLength) {
+        return text;
+    }
+    return `${text.slice(0, Math.max(0, maxLength - 3))}...`;
+}
+
+// ═══════════════════════════════════════════
+// Notifications (in-page)
 // ═══════════════════════════════════════════
 function showNotification(message, type = 'info') {
     const colors = {
@@ -825,22 +1473,55 @@ function showNotification(message, type = 'info') {
 // Submit Command Modal
 // ═══════════════════════════════════════════
 function initSubmitModal() {
-    document.getElementById('submit-command-btn').addEventListener('click', () => {
-        if (!state.principal) {
-            showLoginOverlay('Sign in to submit commands.');
+    document.addEventListener('click', event => {
+        const trigger = event.target.closest('[data-submit-command-trigger], #submit-command-btn');
+        if (!trigger) {
             return;
         }
-        document.getElementById('cmd-requester').value = state.principal.identifier;
-        document.getElementById('submit-modal').style.display = 'flex';
+        event.preventDefault();
+        openSubmitModal();
     });
 
-    document.getElementById('cmd-input').addEventListener('input', schedulePolicyPreview);
-    document.getElementById('cmd-args').addEventListener('input', schedulePolicyPreview);
-    document.getElementById('cmd-working-dir').addEventListener('input', schedulePolicyPreview);
+    const commandInput = document.getElementById('cmd-input');
+    const argsInput = document.getElementById('cmd-args');
+    const workingDirInput = document.getElementById('cmd-working-dir');
+    if (commandInput) {
+        commandInput.addEventListener('input', schedulePolicyPreview);
+    }
+    if (argsInput) {
+        argsInput.addEventListener('input', schedulePolicyPreview);
+    }
+    if (workingDirInput) {
+        workingDirInput.addEventListener('input', schedulePolicyPreview);
+    }
+}
+
+function openSubmitModal() {
+    if (!state.principal) {
+        showLoginOverlay('Sign in to submit commands.');
+        return;
+    }
+
+    const submitModal = document.getElementById('submit-modal');
+    if (!submitModal) {
+        showNotification('Direct command form is unavailable', 'error');
+        return;
+    }
+
+    const requesterInput = document.getElementById('cmd-requester');
+    if (requesterInput) {
+        requesterInput.value = state.principal.identifier;
+    }
+    submitModal.style.display = 'flex';
+    document.getElementById('cmd-input')?.focus();
 }
 
 function closeModal() {
-    document.getElementById('submit-modal').style.display = 'none';
+    const submitModal = document.getElementById('submit-modal');
+    if (!submitModal) {
+        return;
+    }
+    submitModal.style.display = 'none';
     document.getElementById('cmd-input').value = '';
     document.getElementById('cmd-args').value = '';
     document.getElementById('cmd-timeout').value = '';
@@ -854,7 +1535,11 @@ function hidePolicyPreview() {
         state.previewTimer = null;
     }
 
-    document.getElementById('risk-preview').style.display = 'none';
+    const preview = document.getElementById('risk-preview');
+    if (!preview) {
+        return;
+    }
+    preview.style.display = 'none';
     document.getElementById('risk-preview-text').textContent = '';
     document.getElementById('risk-preview-extra').textContent = '';
     document.getElementById('risk-preview-rules').textContent = '';
@@ -1015,7 +1700,7 @@ async function submitCommand() {
             }
             showNotification(msg, tone);
             closeModal();
-            navigateTo(state.currentPage);
+            refreshCurrentPageData();
         } else {
             showNotification(result.error || 'Submission failed', 'error');
         }
@@ -1071,7 +1756,7 @@ async function processApproval(decision) {
                 : 'Command rejected';
             showNotification(message, decision === 'approve' ? 'success' : 'warning');
             closeApprovalModal();
-            navigateTo(state.currentPage);
+            refreshCurrentPageData();
         } else {
             showNotification(result.error || 'Action failed', 'error');
         }
@@ -1223,7 +1908,8 @@ function renderApprovalContext(command) {
 function updateNavigationForPrincipal() {
     document.querySelectorAll('.nav-link').forEach(link => {
         const adminOnly = link.dataset.adminOnly === 'true';
-        link.style.display = !adminOnly || isAdminPrincipal(state.principal) ? '' : 'none';
+        const authOnly = link.dataset.authOnly === 'true';
+        link.style.display = (!authOnly || state.principal) && (!adminOnly || isAdminPrincipal(state.principal)) ? '' : 'none';
     });
     updateModeLabels();
 }

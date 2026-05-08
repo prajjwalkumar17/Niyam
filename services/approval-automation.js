@@ -112,7 +112,9 @@ function applyAutoApprovalIfEligible(options) {
                 id: commandData.id,
                 command: commandData.command,
                 args: commandData.args,
-                approvals: 1
+                approvals: 1,
+                playgroundRunId: commandData.playgroundRunId || null,
+                playgroundScenario: commandData.playgroundScenario || null
             });
         }
         if (onApproved) {
@@ -155,7 +157,9 @@ function applyAutoApprovalIfEligible(options) {
             id: commandData.id,
             command: commandData.command,
             approvals: 1,
-            required: evaluation.threshold.requiredApprovals
+            required: evaluation.threshold.requiredApprovals,
+            playgroundRunId: commandData.playgroundRunId || null,
+            playgroundScenario: commandData.playgroundScenario || null
         });
     }
 

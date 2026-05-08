@@ -18,15 +18,18 @@ const { createApprovalsRouter } = require('./api/approvals');
 const { createRulesRouter } = require('./api/rules');
 const { createRulePacksRouter } = require('./api/rule-packs');
 const { createPolicyRouter } = require('./api/policy');
+const { createPlaygroundRouter } = require('./api/playground');
 const { createAuditRouter } = require('./api/audit');
 const { createCliRouter } = require('./api/cli');
 const { createMyApprovalPreferencesRouter } = require('./api/my-approval-preferences');
+const { createNotificationsRouter } = require('./api/notifications');
 const { createSignupRequestsRouter } = require('./api/signup-requests');
 const { createMyTokensRouter, createTokensRouter } = require('./api/tokens');
 const { createUsersRouter } = require('./api/users');
 const { buildWorkspaceRouter } = require('./api/workspace');
 const { broadcastManager, broadcast } = require('./ws/broadcast');
 const ExecutionGuard = require('./executor/guard');
+const { createNativeNotificationService } = require('./services/native-notifications');
 const { createRequestLogger, logger, metrics } = require('./observability');
 
 validateConfig();
@@ -49,6 +52,18 @@ assertProductModeLock(db);
 const app = express();
 const server = http.createServer(app);
 const auth = createAuth(db);
+const nativeNotifications = createNativeNotificationService(db);
+const publishEvent = (eventType, data = {}) => {
+    broadcast(eventType, data);
+    try {
+        nativeNotifications.handleEvent(eventType, data);
+    } catch (error) {
+        logger.warn('native_notification_event_failed', {
+            eventType,
+            error: error.message
+        });
+    }
+};
 
 // Middleware
 app.use(createRequestLogger(metrics));
@@ -78,7 +93,7 @@ broadcastManager.init(server, {
 });
 
 // Initialize execution guard
-const guard = new ExecutionGuard(db, broadcast);
+const guard = new ExecutionGuard(db, publishEvent);
 const queueExecution = (commandId) => {
     setImmediate(async () => {
         try {
@@ -145,14 +160,16 @@ app.get('/api/health', (req, res) => {
 });
 
 // Authenticated API routes
-app.use('/api/commands', auth.requireAuth, createCommandsRouter(db, broadcast, { onApproved: queueExecution }));
-app.use('/api/approvals', auth.requireAuth, createApprovalsRouter(db, broadcast, { onApproved: queueExecution }));
+app.use('/api/commands', auth.requireAuth, createCommandsRouter(db, publishEvent, { onApproved: queueExecution }));
+app.use('/api/approvals', auth.requireAuth, createApprovalsRouter(db, publishEvent, { onApproved: queueExecution }));
 app.use('/api/policy', auth.requireAuth, createPolicyRouter(db));
-app.use('/api/cli', auth.requireAuth, createCliRouter(db, broadcast, auth, { onApproved: queueExecution }));
+app.use('/api/playground', auth.requireAuth, createPlaygroundRouter(db, publishEvent));
+app.use('/api/cli', auth.requireAuth, createCliRouter(db, publishEvent, auth, { onApproved: queueExecution }));
 app.use('/api/my/approval-preferences', auth.requireUserSession, createMyApprovalPreferencesRouter(db));
 app.use('/api/my/tokens', auth.requireUserSession, createMyTokensRouter(db));
 app.use('/api/workspace', auth.requireAuth, buildWorkspaceRouter(db));
-app.use('/api/rules', auth.requireAdmin, createRulesRouter(db, broadcast));
+app.use('/api/notifications', auth.requireAdmin, createNotificationsRouter(nativeNotifications));
+app.use('/api/rules', auth.requireAdmin, createRulesRouter(db, publishEvent));
 app.use('/api/rule-packs', auth.requireAdmin, createRulePacksRouter(db));
 app.use('/api/audit', auth.requireAdmin, createAuditRouter(db));
 app.use('/api/tokens', auth.requireAdmin, createTokensRouter(db));
@@ -174,7 +191,7 @@ app.get('*', (req, res) => {
 // Timeout checker - runs every 60 seconds
 setInterval(() => {
     const guardRunner = require('./executor/runner');
-    const runner = new guardRunner(db, broadcast);
+    const runner = new guardRunner(db, publishEvent);
     runner.checkTimeouts();
 }, 60000);
 

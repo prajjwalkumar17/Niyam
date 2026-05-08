@@ -15,6 +15,7 @@ const TOKEN_STATUS_ACTIVE = 'active';
 const TOKEN_STATUS_BLOCKED = 'blocked';
 const TOKEN_SUBJECT_STANDALONE = 'standalone';
 const TOKEN_SUBJECT_USER = 'user';
+const APPROVAL_NOTIFICATIONS_METADATA_KEY = 'approvalNotificationsEnabled';
 
 function createTokensService(db) {
     const users = createUsersService(db);
@@ -78,6 +79,11 @@ function createTokensService(db) {
             SET auto_approval_enabled = ?, auto_approval_mode = ?, metadata = ?
             WHERE id = ?
         `),
+        updateMetadata: db.prepare(`
+            UPDATE managed_tokens
+            SET metadata = ?
+            WHERE id = ?
+        `),
         getStandaloneByIdentifier: db.prepare(`
             SELECT *
             FROM managed_tokens
@@ -90,11 +96,16 @@ function createTokensService(db) {
         const label = normalizeLabel(payload.label);
         const now = new Date().toISOString();
         const tokenId = uuidv4();
-        const metadata = payload.metadata || {};
+        const metadata = {
+            ...(payload.metadata || {})
+        };
         let userId = null;
         let principalIdentifier = null;
         let principalDisplayName = null;
         const autoApprovalMode = normalizeAutoApprovalMode(payload.autoApprovalMode, payload.autoApprovalEnabled ? 'normal' : AUTO_APPROVAL_MODE_OFF);
+        if (!Object.prototype.hasOwnProperty.call(metadata, APPROVAL_NOTIFICATIONS_METADATA_KEY)) {
+            metadata[APPROVAL_NOTIFICATIONS_METADATA_KEY] = !isAutoApprovalEnabled(autoApprovalMode);
+        }
 
         if (!label) {
             const error = new Error('Label is required');
@@ -215,6 +226,33 @@ function createTokensService(db) {
         return getTokenById(tokenId);
     }
 
+    function setApprovalNotificationPreference(tokenId, enabled, options = {}) {
+        const current = statements.getTokenById.get(tokenId);
+        if (!current) {
+            const error = new Error('Token not found');
+            error.code = 'not_found';
+            throw error;
+        }
+
+        if (options.userId && current.user_id !== options.userId) {
+            const error = new Error('Token not found');
+            error.code = 'not_found';
+            throw error;
+        }
+
+        const metadata = {
+            ...parseJson(current.metadata, {}),
+            [APPROVAL_NOTIFICATIONS_METADATA_KEY]: Boolean(enabled)
+        };
+
+        statements.updateMetadata.run(
+            JSON.stringify(metadata),
+            tokenId
+        );
+
+        return getTokenById(tokenId);
+    }
+
     function setStandaloneAutoApprovalPreference(tokenId, mode) {
         const current = statements.getTokenById.get(tokenId);
         if (!current) {
@@ -234,6 +272,9 @@ function createTokensService(db) {
             autoApprovalScope: 'token'
         };
         const normalizedMode = normalizeAutoApprovalMode(mode);
+        if (isAutoApprovalEnabled(normalizedMode)) {
+            metadata[APPROVAL_NOTIFICATIONS_METADATA_KEY] = false;
+        }
         statements.updateAutoApprovalMode.run(
             isAutoApprovalEnabled(normalizedMode) ? 1 : 0,
             normalizedMode,
@@ -341,6 +382,7 @@ function createTokensService(db) {
         createManagedToken,
         getTokenById,
         listTokens,
+        setApprovalNotificationPreference,
         setStandaloneAutoApprovalPreference
     };
 }
@@ -384,6 +426,10 @@ function shapeManagedToken(row) {
     const userDisplayName = row.user_display_name || userUsername;
     const standaloneMode = autoApprovalModeFromStored(row.auto_approval_mode, row.auto_approval_enabled);
     const userMode = autoApprovalModeFromStored(row.user_auto_approval_mode, row.user_auto_approval_enabled);
+    const metadata = parseJson(row.metadata, {});
+    const effectiveAutoApprovalEnabled = row.subject_type === TOKEN_SUBJECT_STANDALONE
+        ? isAutoApprovalEnabled(standaloneMode)
+        : isAutoApprovalEnabled(userMode);
     return {
         id: row.id,
         label: row.label,
@@ -397,9 +443,7 @@ function shapeManagedToken(row) {
             : (row.principal_display_name || row.principal_identifier || null),
         status: row.status,
         tokenPrefix: row.token_prefix,
-        autoApprovalEnabled: row.subject_type === TOKEN_SUBJECT_STANDALONE
-            ? isAutoApprovalEnabled(standaloneMode)
-            : isAutoApprovalEnabled(userMode),
+        autoApprovalEnabled: effectiveAutoApprovalEnabled,
         autoApprovalMode: row.subject_type === TOKEN_SUBJECT_STANDALONE
             ? standaloneMode
             : userMode,
@@ -410,12 +454,13 @@ function shapeManagedToken(row) {
             ? userMode
             : null,
         autoApprovalScope: row.subject_type === TOKEN_SUBJECT_STANDALONE ? 'token' : 'user',
+        approvalNotificationsEnabled: resolveApprovalNotificationsEnabled(metadata, effectiveAutoApprovalEnabled),
         createdBy: row.created_by,
         createdAt: row.created_at,
         lastUsedAt: row.last_used_at || null,
         blockedAt: row.blocked_at || null,
         blockedBy: row.blocked_by || null,
-        metadata: parseJson(row.metadata, {}),
+        metadata,
         linkedUser: row.subject_type === TOKEN_SUBJECT_USER
             ? {
                 id: row.user_id,
@@ -425,6 +470,20 @@ function shapeManagedToken(row) {
             }
             : null
     };
+}
+
+function resolveApprovalNotificationsEnabled(metadata, autoApprovalEnabled) {
+    if (Object.prototype.hasOwnProperty.call(metadata, APPROVAL_NOTIFICATIONS_METADATA_KEY)) {
+        const stored = metadata[APPROVAL_NOTIFICATIONS_METADATA_KEY];
+        if ([true, 1, '1', 'true'].includes(stored)) {
+            return true;
+        }
+        if ([false, 0, '0', 'false'].includes(stored)) {
+            return false;
+        }
+    }
+
+    return !autoApprovalEnabled;
 }
 
 module.exports = {

@@ -9,6 +9,7 @@ const Database = require('better-sqlite3');
 const { v4: uuidv4 } = require('uuid');
 const CommandRunner = require('../executor/runner');
 const { renderShellInit } = require('../cli/shell-snippets');
+const { createNativeNotificationService } = require('../services/native-notifications');
 const { createUsersService } = require('../services/users');
 const { createTestContext, ROOT_DIR, sleep } = require('./helpers/test-harness');
 
@@ -178,6 +179,171 @@ test('cli dispatches support remote exec, local passthrough, and blocked routing
     assert.ok(audit.json.entries.some(entry => entry.event_type === 'cli_dispatch_blocked'));
 });
 
+test('playground creates safe lifecycle runs across dashboard and wrapper modes', async () => {
+    const manual = await apiJson('/api/playground/runs', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            scenario: 'dashboard_medium',
+            approvalMode: 'off'
+        }
+    });
+    assert.equal(manual.status, 201);
+    assert.equal(manual.json.run.scenario, 'dashboard_medium');
+    assert.equal(manual.json.run.status, 'pending');
+    assert.equal(manual.json.run.route, 'DASHBOARD');
+    assert.ok(manual.json.run.commandId);
+    assert.equal(manual.json.run.commandRecord.requester, 'playground-off');
+    assert.equal(manual.json.run.commandRecord.metadata.source, 'playground');
+    assert.equal(manual.json.run.commandRecord.metadata.playgroundRunId, manual.json.run.id);
+
+    const auto = await apiJson('/api/playground/runs', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            scenario: 'dashboard_medium',
+            approvalMode: 'normal'
+        }
+    });
+    assert.equal(auto.status, 201);
+    assert.equal(auto.json.run.status, 'approved');
+    assert.equal(auto.json.run.commandRecord.metadata.playgroundApprovalMode, 'normal');
+
+    const local = await apiJson('/api/playground/runs', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            scenario: 'wrapper_local',
+            approvalMode: 'off'
+        }
+    });
+    assert.equal(local.status, 201);
+    assert.equal(local.json.run.route, 'LOCAL_PASSTHROUGH');
+    assert.equal(local.json.run.status, 'local_completed');
+    assert.equal(local.json.run.commandId, null);
+    assert.equal(local.json.run.dispatchRecord.metadata.playgroundRunId, local.json.run.id);
+
+    const blocked = await apiJson('/api/playground/runs', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            scenario: 'wrapper_blocked',
+            approvalMode: 'all'
+        }
+    });
+    assert.equal(blocked.status, 201);
+    assert.equal(blocked.json.run.route, 'BLOCKED');
+    assert.equal(blocked.json.run.commandId, null);
+    assert.equal(blocked.json.run.status, 'blocked');
+
+    const runs = await apiJson('/api/playground/runs?limit=10', {
+        method: 'GET',
+        cookie: adminCookie
+    });
+    assert.equal(runs.status, 200);
+    assert.ok(runs.json.runs.some(run => run.id === manual.json.run.id));
+    assert.ok(runs.json.runs.some(run => run.id === blocked.json.run.id));
+});
+
+test('playground custom simulations are ephemeral predictions only', async () => {
+    const blockRule = await apiJson('/api/rules', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            name: 'Block Playground Simulation Echo',
+            description: 'Force a blocked playground simulation route for testing',
+            rule_type: 'denylist',
+            pattern: 'echo blocked-simulation',
+            priority: 710
+        }
+    });
+    assert.equal(blockRule.status, 201);
+
+    const readCounts = () => {
+        const db = new Database(path.join(dataDir, 'niyam.db'), { readonly: true });
+        try {
+            return {
+                commands: db.prepare('SELECT COUNT(*) AS count FROM commands').get().count,
+                cliDispatches: db.prepare('SELECT COUNT(*) AS count FROM cli_dispatches').get().count,
+                playgroundRuns: db.prepare('SELECT COUNT(*) AS count FROM playground_runs').get().count,
+                auditEntries: db.prepare('SELECT COUNT(*) AS count FROM audit_log').get().count
+            };
+        } finally {
+            db.close();
+        }
+    };
+    const before = readCounts();
+
+    const manual = await apiJson('/api/playground/simulate', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            rawCommand: 'gh pr create --title custom-demo',
+            sourceMode: 'dashboard',
+            approvalMode: 'off'
+        }
+    });
+    assert.equal(manual.status, 200);
+    assert.equal(manual.json.route, 'DASHBOARD');
+    assert.equal(manual.json.riskLevel, 'MEDIUM');
+    assert.equal(manual.json.predictedStatus, 'pending');
+    assert.equal(manual.json.approvalPrediction.approvalMode, 'manual_pending');
+    assert.equal(manual.json.timelineSteps.length, 4);
+
+    const auto = await apiJson('/api/playground/simulate', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            rawCommand: 'gh pr create --title custom-demo',
+            sourceMode: 'dashboard',
+            approvalMode: 'normal'
+        }
+    });
+    assert.equal(auto.status, 200);
+    assert.equal(auto.json.predictedStatus, 'approved');
+    assert.equal(auto.json.approvalPrediction.approvalMode, 'auto_agent_approved');
+
+    const local = await apiJson('/api/playground/simulate', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            rawCommand: 'cd public',
+            sourceMode: 'wrapper',
+            approvalMode: 'off'
+        }
+    });
+    assert.equal(local.status, 200);
+    assert.equal(local.json.route, 'LOCAL_PASSTHROUGH');
+    assert.equal(local.json.predictedStatus, 'created');
+
+    const blocked = await apiJson('/api/playground/simulate', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            rawCommand: 'echo blocked-simulation',
+            sourceMode: 'wrapper',
+            approvalMode: 'all'
+        }
+    });
+    assert.equal(blocked.status, 200);
+    assert.equal(blocked.json.route, 'BLOCKED');
+    assert.equal(blocked.json.predictedStatus, 'blocked');
+    assert.equal(blocked.json.allowed, false);
+
+    const customRun = await apiJson('/api/playground/runs', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            scenario: 'custom',
+            rawCommand: 'echo should-not-save'
+        }
+    });
+    assert.equal(customRun.status, 400);
+    assert.match(customRun.json.error, /simulation-only/i);
+
+    assert.deepEqual(readCounts(), before);
+});
+
 test('write endpoints reject invalid payloads', async () => {
     const badSimulation = await apiJson('/api/policy/simulate', {
         method: 'POST',
@@ -214,6 +380,84 @@ test('unknown api routes return a 404 json response instead of hanging', async (
     assert.equal(response.json.error, 'API route not found');
 });
 
+test('native approval notifications emit only for eligible approval events', async () => {
+    const notificationDb = new Database(path.join(dataDir, 'niyam.db'));
+    const calls = [];
+    const service = createNativeNotificationService(notificationDb, {
+        platform: 'darwin',
+        disabled: false,
+        spawn: (command, args, options) => {
+            calls.push({ command, args, options });
+            return {
+                on() {},
+                unref() {}
+            };
+        }
+    });
+
+    try {
+        assert.equal(service.setEnabled(true), true);
+        assert.equal(service.isSupported(), true);
+
+        const pendingSent = service.handleEvent('command_submitted', {
+            id: 'native-pending-1',
+            command: 'mkdir',
+            args: ['txt'],
+            requester: 'June',
+            riskLevel: 'MEDIUM',
+            status: 'pending',
+            autoApproved: false,
+            approvalNotificationsEnabled: true,
+            approvalMode: 'manual_pending'
+        });
+        assert.equal(pendingSent, true);
+        assert.equal(calls.length, 1);
+        assert.equal(calls[0].command, '/usr/bin/osascript');
+        assert.match(calls[0].args[1], /Niyam approval needed/);
+        assert.match(calls[0].args[1], /mkdir txt/);
+
+        const suppressed = service.handleEvent('command_submitted', {
+            id: 'native-pending-muted',
+            command: 'mkdir',
+            args: ['quiet'],
+            requester: 'June',
+            riskLevel: 'MEDIUM',
+            status: 'pending',
+            autoApproved: false,
+            approvalNotificationsEnabled: false,
+            approvalMode: 'manual_pending'
+        });
+        assert.equal(suppressed, false);
+        assert.equal(calls.length, 1);
+
+        const approvedSent = service.handleEvent('command_approved', {
+            id: 'native-approved-1',
+            command: 'rm',
+            args: ['-rf', 'txt'],
+            requester: 'May',
+            riskLevel: 'HIGH',
+            approvalNotificationsEnabled: true
+        });
+        assert.equal(approvedSent, true);
+        assert.equal(calls.length, 2);
+        assert.match(calls[1].args[1], /Niyam approval recorded/);
+        assert.match(calls[1].args[1], /rm -rf txt/);
+
+        const duplicate = service.handleEvent('command_approved', {
+            id: 'native-approved-1',
+            command: 'rm',
+            args: ['-rf', 'txt'],
+            requester: 'May',
+            riskLevel: 'HIGH',
+            approvalNotificationsEnabled: true
+        });
+        assert.equal(duplicate, false);
+        assert.equal(calls.length, 2);
+    } finally {
+        notificationDb.close();
+    }
+});
+
 test('server no longer serves why-niyam deck and falls back to dashboard shell', async () => {
     const response = await fetch(`${baseUrl}/why-niyam`);
     assert.equal(response.status, 200);
@@ -225,6 +469,49 @@ test('server no longer serves why-niyam deck and falls back to dashboard shell',
 });
 
 test('built-in rule pack install is idempotent and influences simulation', async () => {
+    const defaultPack = await apiJson('/api/rule-packs/default', {
+        method: 'GET',
+        cookie: adminCookie
+    });
+
+    assert.equal(defaultPack.status, 200);
+    assert.equal(defaultPack.json.id, 'default');
+    assert.equal(defaultPack.json.installed, true);
+    assert.equal(defaultPack.json.installedRuleCount, 12);
+    assert.equal(defaultPack.json.totalRules, 12);
+
+    const defaultRules = await apiJson('/api/rules', {
+        method: 'GET',
+        cookie: adminCookie
+    });
+    assert.equal(defaultRules.status, 200);
+    assert.equal(defaultRules.json.filter(rule => rule.managed_by_pack === 'default').length, 12);
+
+    const uninstallDefault = await apiJson('/api/rule-packs/default/install', {
+        method: 'DELETE',
+        cookie: adminCookie
+    });
+
+    assert.equal(uninstallDefault.status, 200);
+    assert.equal(uninstallDefault.json.deleted.length, 12);
+
+    const defaultAfterUninstall = await apiJson('/api/rule-packs/default', {
+        method: 'GET',
+        cookie: adminCookie
+    });
+    assert.equal(defaultAfterUninstall.status, 200);
+    assert.equal(defaultAfterUninstall.json.installed, false);
+    assert.equal(defaultAfterUninstall.json.installedRuleCount, 0);
+
+    const reinstallDefault = await apiJson('/api/rule-packs/default/install', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: { mode: 'install_if_missing' }
+    });
+
+    assert.equal(reinstallDefault.status, 201);
+    assert.equal(reinstallDefault.json.inserted.length, 12);
+
     const firstInstall = await apiJson('/api/rule-packs/gh/install', {
         method: 'POST',
         cookie: adminCookie,
@@ -335,7 +622,8 @@ test('versioned migrations are recorded in schema_migrations', async () => {
         '006_managed_tokens_and_auth_context',
         '007_auto_approval_preferences',
         '008_runtime_product_mode_lock',
-        '009_auto_approval_modes'
+        '009_auto_approval_modes',
+        '010_playground_runs'
     ]);
 });
 
@@ -624,7 +912,18 @@ test('managed tokens support standalone identities, admin-issued user tokens, an
     assert.equal(userToken.status, 201);
     assert.equal(userToken.json.token.subjectType, 'user');
     assert.equal(userToken.json.token.userId, createUser.json.id);
+    assert.equal(userToken.json.token.approvalNotificationsEnabled, true);
     assert.match(userToken.json.plainTextToken, /^nym_/);
+
+    const disableUserTokenNotifications = await apiJson(`/api/tokens/${userToken.json.token.id}/notification-preferences`, {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            approvalNotificationsEnabled: false
+        }
+    });
+    assert.equal(disableUserTokenNotifications.status, 200);
+    assert.equal(disableUserTokenNotifications.json.token.approvalNotificationsEnabled, false);
 
     const meWithUserToken = await apiJson('/api/auth/me', {
         method: 'GET',
@@ -664,7 +963,18 @@ test('managed tokens support standalone identities, admin-issued user tokens, an
         }
     });
     assert.equal(standaloneToken.status, 201);
+    assert.equal(standaloneToken.json.token.approvalNotificationsEnabled, true);
     assert.match(standaloneToken.json.plainTextToken, /^nym_/);
+
+    const disableStandaloneNotifications = await apiJson(`/api/tokens/${standaloneToken.json.token.id}/notification-preferences`, {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            approvalNotificationsEnabled: false
+        }
+    });
+    assert.equal(disableStandaloneNotifications.status, 200);
+    assert.equal(disableStandaloneNotifications.json.token.approvalNotificationsEnabled, false);
 
     const standaloneMe = await apiJson('/api/auth/me', {
         method: 'GET',
@@ -685,6 +995,8 @@ test('managed tokens support standalone identities, admin-issued user tokens, an
         }
     });
     assert.equal(standaloneSubmission.status, 201);
+    assert.equal(standaloneSubmission.json.approvalNotificationsEnabled, false);
+    assert.equal(standaloneSubmission.json.approvalNotificationPreferenceScope, 'token');
 
     const standaloneCommand = await waitForCommand(standaloneSubmission.json.id);
     assert.equal(standaloneCommand.requester, 'June');
@@ -784,7 +1096,18 @@ test('teams-mode users can self-manage CLI tokens and token auth is reflected in
     assert.equal(createOwnToken.status, 201);
     assert.equal(createOwnToken.json.token.subjectType, 'user');
     assert.equal(createOwnToken.json.token.userId, createUser.json.id);
+    assert.equal(createOwnToken.json.token.approvalNotificationsEnabled, true);
     assert.match(createOwnToken.json.plainTextToken, /^nym_/);
+
+    const disableOwnTokenNotifications = await apiJson(`/api/my/tokens/${createOwnToken.json.token.id}/notification-preferences`, {
+        method: 'POST',
+        cookie: selfLogin.cookie,
+        body: {
+            approvalNotificationsEnabled: false
+        }
+    });
+    assert.equal(disableOwnTokenNotifications.status, 200);
+    assert.equal(disableOwnTokenNotifications.json.token.approvalNotificationsEnabled, false);
 
     const listOwnTokens = await apiJson('/api/my/tokens', {
         method: 'GET',
@@ -792,6 +1115,10 @@ test('teams-mode users can self-manage CLI tokens and token auth is reflected in
     });
     assert.equal(listOwnTokens.status, 200);
     assert.ok(listOwnTokens.json.tokens.some(token => token.id === createOwnToken.json.token.id));
+    assert.ok(listOwnTokens.json.tokens.some(token => (
+        token.id === createOwnToken.json.token.id &&
+        token.approvalNotificationsEnabled === false
+    )));
 
     const otherAdminToken = await apiJson('/api/tokens', {
         method: 'POST',
@@ -803,6 +1130,15 @@ test('teams-mode users can self-manage CLI tokens and token auth is reflected in
         }
     });
     assert.equal(otherAdminToken.status, 201);
+
+    const updateOtherUserTokenNotifications = await apiJson(`/api/my/tokens/${otherAdminToken.json.token.id}/notification-preferences`, {
+        method: 'POST',
+        cookie: selfLogin.cookie,
+        body: {
+            approvalNotificationsEnabled: true
+        }
+    });
+    assert.equal(updateOtherUserTokenNotifications.status, 404);
 
     const blockOtherUserToken = await apiJson(`/api/my/tokens/${otherAdminToken.json.token.id}/block`, {
         method: 'POST',
@@ -857,6 +1193,8 @@ test('teams-mode users can self-manage CLI tokens and token auth is reflected in
         }
     });
     assert.equal(linkedSubmission.status, 201);
+    assert.equal(linkedSubmission.json.approvalNotificationsEnabled, false);
+    assert.equal(linkedSubmission.json.approvalNotificationPreferenceScope, 'token');
 
     const linkedCommand = await waitForCommand(linkedSubmission.json.id);
     assert.equal(linkedCommand.requester, 'self-token-user');
@@ -1150,6 +1488,7 @@ test('auto approval preferences drive user-linked and standalone token approval 
     assert.equal(standaloneToken.status, 201);
     assert.equal(standaloneToken.json.token.autoApprovalEnabled, false);
     assert.equal(standaloneToken.json.token.autoApprovalMode, 'off');
+    assert.equal(standaloneToken.json.token.approvalNotificationsEnabled, true);
 
     const enableStandalonePreference = await apiJson(`/api/tokens/${standaloneToken.json.token.id}/approval-preferences`, {
         method: 'POST',
@@ -1161,6 +1500,7 @@ test('auto approval preferences drive user-linked and standalone token approval 
     assert.equal(enableStandalonePreference.status, 200);
     assert.equal(enableStandalonePreference.json.token.autoApprovalEnabled, true);
     assert.equal(enableStandalonePreference.json.token.autoApprovalMode, 'normal');
+    assert.equal(enableStandalonePreference.json.token.approvalNotificationsEnabled, false);
 
     const standaloneMe = await apiJson('/api/auth/me', {
         method: 'GET',
@@ -1190,6 +1530,18 @@ test('auto approval preferences drive user-linked and standalone token approval 
     });
     assert.equal(standaloneMedium.status, 201);
     assert.equal(standaloneMedium.json.status, 'approved');
+    assert.equal(standaloneMedium.json.approvalNotificationsEnabled, false);
+
+    const reenableStandaloneNotifications = await apiJson(`/api/tokens/${standaloneToken.json.token.id}/notification-preferences`, {
+        method: 'POST',
+        cookie: adminCookie,
+        body: {
+            approvalNotificationsEnabled: true
+        }
+    });
+    assert.equal(reenableStandaloneNotifications.status, 200);
+    assert.equal(reenableStandaloneNotifications.json.token.autoApprovalEnabled, true);
+    assert.equal(reenableStandaloneNotifications.json.token.approvalNotificationsEnabled, true);
     assert.equal(standaloneMedium.json.approvalMode, 'auto_agent_approved');
 
     const standaloneCommand = await waitForCommand(standaloneMedium.json.id);
@@ -2327,7 +2679,7 @@ test('backup and restore scripts preserve the database state', async () => {
     restoredDb.close();
 
     assert.ok(commandCount >= 1);
-    assert.equal(migrationCount, 9);
+    assert.equal(migrationCount, 10);
 });
 
 test('exec key rotation preserves delayed execution payloads', async () => {

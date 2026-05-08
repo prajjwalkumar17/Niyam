@@ -21,10 +21,11 @@ function getPack(db, packId) {
     };
 }
 
-function installPack(db, packId, mode = 'install_if_missing') {
+function installPack(db, packId, mode = 'install_if_missing', options = {}) {
     const pack = loadPack(packId);
     const inserted = [];
     const skipped = [];
+    const adopted = [];
 
     for (const rule of pack.rules) {
         const normalizedRule = normalizePackRule(rule);
@@ -32,6 +33,15 @@ function installPack(db, packId, mode = 'install_if_missing') {
         if (existing) {
             skipped.push(describeRule(existing, normalizedRule.pack_rule_id));
             continue;
+        }
+
+        if (options.adoptExisting) {
+            const adoptableRule = findAdoptableRule(db, normalizedRule);
+            if (adoptableRule) {
+                adoptPackRule(db, pack, normalizedRule, adoptableRule.id);
+                adopted.push(describeRule(adoptableRule, normalizedRule.pack_rule_id));
+                continue;
+            }
         }
 
         insertPackRule(db, pack, normalizedRule, mode);
@@ -45,6 +55,7 @@ function installPack(db, packId, mode = 'install_if_missing') {
         pack: summarizePack(pack, db),
         mode,
         inserted,
+        adopted,
         skipped
     };
 }
@@ -137,6 +148,23 @@ function applyPackUpgrade(db, packId) {
     };
 }
 
+function uninstallPack(db, packId) {
+    const pack = loadPack(packId);
+    const installedRows = db.prepare(`
+        SELECT * FROM rules
+        WHERE managed_by_pack = ?
+        ORDER BY priority DESC, created_at ASC
+    `).all(pack.id);
+
+    db.prepare('DELETE FROM rules WHERE managed_by_pack = ?').run(pack.id);
+
+    return {
+        pack: summarizePack(pack, db),
+        deleted: installedRows.map(rule => describeRule(rule, rule.managed_by_pack_rule_id)),
+        deletedCount: installedRows.length
+    };
+}
+
 function summarizePack(pack, db) {
     const installedRows = db
         ? db.prepare('SELECT * FROM rules WHERE managed_by_pack = ?').all(pack.id)
@@ -152,6 +180,33 @@ function summarizePack(pack, db) {
         installedRuleCount: installedRows.length,
         installedVersion: installedRows[0] ? installedRows[0].managed_by_pack_version || null : null
     };
+}
+
+function adoptPackRule(db, pack, rule, existingRuleId) {
+    const existing = db.prepare('SELECT metadata FROM rules WHERE id = ?').get(existingRuleId);
+    const existingMetadata = parseJson(existing?.metadata, {});
+    const nextMetadata = JSON.stringify({
+        ...existingMetadata,
+        ...(rule.metadata || {}),
+        pack_signature: buildRuleSignature(rule)
+    });
+
+    db.prepare(`
+        UPDATE rules SET
+            managed_by_pack = ?,
+            managed_by_pack_rule_id = ?,
+            managed_by_pack_version = ?,
+            updated_at = ?,
+            metadata = ?
+        WHERE id = ?
+    `).run(
+        pack.id,
+        rule.pack_rule_id,
+        pack.version,
+        new Date().toISOString(),
+        nextMetadata,
+        existingRuleId
+    );
 }
 
 function insertPackRule(db, pack, rule) {
@@ -280,6 +335,22 @@ function findInstalledRule(db, packId, packRuleId) {
     `).get(packId, packRuleId);
 }
 
+function findAdoptableRule(db, rule) {
+    if (!db) {
+        return null;
+    }
+
+    const desiredSignature = buildRuleSignature(rule);
+    const candidates = db.prepare(`
+        SELECT * FROM rules
+        WHERE (managed_by_pack IS NULL OR managed_by_pack = '')
+          AND name = ?
+        ORDER BY created_at ASC
+    `).all(rule.name);
+
+    return candidates.find(candidate => buildRuleSignature(candidate) === desiredSignature) || null;
+}
+
 function buildRuleSignature(rule) {
     return JSON.stringify({
         name: rule.name,
@@ -318,5 +389,6 @@ module.exports = {
     getPack,
     installPack,
     listPacks,
-    previewPackUpgrade
+    previewPackUpgrade,
+    uninstallPack
 };

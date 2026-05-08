@@ -15,7 +15,7 @@ const {
 const { addAuthDetails, buildAuthenticationContext, toAuthColumns } = require('./auth-context');
 const { logAudit } = require('./audit-log');
 const { persistCommandSubmission, prepareCommandSubmission } = require('./command-submissions');
-const { shapeCliDispatchRecord } = require('./record-shaping');
+const { parseJson, shapeCliDispatchRecord } = require('./record-shaping');
 
 const ROUTES = new Set(['REMOTE_EXEC', 'LOCAL_PASSTHROUGH', 'BLOCKED', 'SKIPPED']);
 const FIRST_TOKEN_TYPES = new Set(['external', 'builtin', 'alias', 'function', 'keyword', 'unknown']);
@@ -26,7 +26,7 @@ function createCliDispatchService(db, options = {}) {
     const broadcast = options.broadcast;
     const onApproved = options.onApproved;
 
-    function createDispatch(payload, principal, authentication) {
+    function createDispatch(payload, principal, authentication, runOptions = {}) {
         const rawCommand = String(payload.rawCommand || '').trim();
         if (isBlankCommand(rawCommand) || isCommentOnlyCommand(rawCommand)) {
             return {
@@ -56,6 +56,8 @@ function createCliDispatchService(db, options = {}) {
         }
 
         const metadata = payload.metadata || {};
+        const playgroundRunId = metadata.playgroundRunId || null;
+        const playgroundScenario = metadata.playgroundScenario || null;
         const workingDir = payload.workingDir || null;
         const firstTokenType = normalizeFirstTokenType(payload.firstTokenType);
         const tokens = tokenizeCommand(rawCommand);
@@ -144,7 +146,9 @@ function createCliDispatchService(db, options = {}) {
                 id: dispatchId,
                 route: routeResult.route,
                 riskLevel: simulation.riskLevel,
-                authenticationContext
+                authenticationContext,
+                playgroundRunId,
+                playgroundScenario
             });
         }
 
@@ -166,7 +170,9 @@ function createCliDispatchService(db, options = {}) {
                     simulation,
                     redactionSummary,
                     commandId: null,
-                    authenticationContext
+                    authenticationContext,
+                    playgroundRunId,
+                    playgroundScenario
                 })
             };
         }
@@ -202,7 +208,9 @@ function createCliDispatchService(db, options = {}) {
                         simulation,
                         redactionSummary,
                         commandId: null,
-                        authenticationContext
+                        authenticationContext,
+                        playgroundRunId,
+                        playgroundScenario
                     })
                 };
             }
@@ -221,7 +229,8 @@ function createCliDispatchService(db, options = {}) {
                 workingDir,
                 evaluation: prepared.evaluation,
                 redactedInput: prepared.redactedInput,
-                authentication
+                authentication,
+                approvalPreference: runOptions.approvalPreference
             });
 
             db.prepare(`
@@ -241,7 +250,9 @@ function createCliDispatchService(db, options = {}) {
                 broadcast('cli_dispatch_linked_command', {
                     id: dispatchId,
                     commandId: commandData.id,
-                    authenticationContext
+                    authenticationContext,
+                    playgroundRunId,
+                    playgroundScenario
                 });
             }
 
@@ -254,7 +265,9 @@ function createCliDispatchService(db, options = {}) {
                     simulation,
                     redactionSummary,
                     commandId: commandData.id,
-                    authenticationContext
+                    authenticationContext,
+                    playgroundRunId,
+                    playgroundScenario
                 })
             };
         }
@@ -268,7 +281,9 @@ function createCliDispatchService(db, options = {}) {
                 simulation,
                 redactionSummary,
                 commandId: null,
-                authenticationContext
+                authenticationContext,
+                playgroundRunId,
+                playgroundScenario
             })
         };
     }
@@ -314,11 +329,14 @@ function createCliDispatchService(db, options = {}) {
             }, authentication || buildAuthenticationContext(row))
         });
         if (broadcast) {
+            const metadata = parseJson(row.metadata, {});
             broadcast('cli_dispatch_updated', {
                 id: dispatchId,
                 status: nextStatus,
                 localExitCode: payload.exitCode,
-                authenticationContext: buildAuthenticationContext(row)
+                authenticationContext: buildAuthenticationContext(row),
+                playgroundRunId: metadata.playgroundRunId || null,
+                playgroundScenario: metadata.playgroundScenario || null
             });
         }
 
@@ -431,7 +449,7 @@ function determineDispatchRoute(options) {
     };
 }
 
-function buildDispatchResponse({ dispatchId, route, reason, simulation, redactionSummary, commandId, authenticationContext }) {
+function buildDispatchResponse({ dispatchId, route, reason, simulation, redactionSummary, commandId, authenticationContext, playgroundRunId, playgroundScenario }) {
     return {
         dispatchId,
         route,
@@ -442,7 +460,9 @@ function buildDispatchResponse({ dispatchId, route, reason, simulation, redactio
         matchedRules: simulation.matchedRules,
         commandId,
         redactionSummary,
-        authenticationContext
+        authenticationContext,
+        playgroundRunId: playgroundRunId || null,
+        playgroundScenario: playgroundScenario || null
     };
 }
 
@@ -474,5 +494,6 @@ function canAccessDispatch(row, principal, authentication) {
 }
 
 module.exports = {
-    createCliDispatchService
+    createCliDispatchService,
+    determineDispatchRoute
 };

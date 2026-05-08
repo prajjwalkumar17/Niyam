@@ -9,6 +9,7 @@ const { createApprovalPreferencesService } = require('./approval-preferences');
 const { applyAutoApprovalIfEligible } = require('./approval-automation');
 const { addAuthDetails, buildAuthenticationContext, toAuthColumns } = require('./auth-context');
 const { logAudit } = require('./audit-log');
+const { createTokensService } = require('./tokens');
 
 function prepareCommandSubmission(db, { command, args = [], metadata = {} }) {
     const policyEngine = new PolicyEngine(db);
@@ -40,7 +41,8 @@ function persistCommandSubmission(options) {
         workingDir = null,
         evaluation,
         redactedInput,
-        authentication
+        authentication,
+        approvalPreference
     } = options;
     const commandId = uuidv4();
     const timeoutAt = calculateTimeout(evaluation.riskLevel, timeoutHours);
@@ -49,13 +51,14 @@ function persistCommandSubmission(options) {
     const now = new Date().toISOString();
     const authColumns = toAuthColumns(authentication);
     const authenticationContext = buildAuthenticationContext(authentication);
-    const approvalPreferences = createApprovalPreferencesService(db).resolveAutoApprovalPreference({
+    const approvalPreferences = approvalPreference || createApprovalPreferencesService(db).resolveAutoApprovalPreference({
         principal: principal || {
             type: requesterType || 'agent',
             identifier: requester
         },
         authentication
     });
+    const notificationPreference = resolveApprovalNotificationPreference(db, authentication);
     const initialApprovalMode = evaluation.autoApproved
         ? 'policy_auto'
         : describeApprovalModeForSubmission(evaluation.riskLevel, approvalPreferences);
@@ -112,6 +115,8 @@ function persistCommandSubmission(options) {
         }, authentication)
     });
 
+    const playgroundRunId = redactedInput.metadata?.playgroundRunId || metadata?.playgroundRunId || null;
+    const playgroundScenario = redactedInput.metadata?.playgroundScenario || metadata?.playgroundScenario || null;
     const commandData = {
         id: commandId,
         command: redactedInput.command,
@@ -129,8 +134,16 @@ function persistCommandSubmission(options) {
         approvalAutomationEnabled: approvalPreferences.autoApprovalEnabled,
         autoApprovalMode: approvalPreferences.autoApprovalMode,
         approvalAutomationScope: approvalPreferences.scope,
+        approvalNotificationsEnabled: notificationPreference.approvalNotificationsEnabled,
+        approvalNotificationPreferenceScope: notificationPreference.scope,
         approvalMode: initialApprovalMode
     };
+    if (playgroundRunId) {
+        commandData.playgroundRunId = playgroundRunId;
+    }
+    if (playgroundScenario) {
+        commandData.playgroundScenario = playgroundScenario;
+    }
 
     if (broadcast) {
         broadcast('command_submitted', commandData);
@@ -138,7 +151,12 @@ function persistCommandSubmission(options) {
 
     if (evaluation.autoApproved) {
         if (broadcast) {
-            broadcast('command_auto_approved', { id: commandId, command: redactedInput.command });
+            broadcast('command_auto_approved', {
+                id: commandId,
+                command: redactedInput.command,
+                playgroundRunId,
+                playgroundScenario
+            });
         }
         if (onApproved) {
             onApproved(commandId);
@@ -178,4 +196,19 @@ function describeApprovalModeForSubmission(riskLevel, preference) {
     }
 
     return 'manual_pending';
+}
+
+function resolveApprovalNotificationPreference(db, authentication) {
+    if (!authentication || authentication.mode !== 'managed_token' || !authentication.credentialId) {
+        return {
+            approvalNotificationsEnabled: true,
+            scope: 'session'
+        };
+    }
+
+    const token = createTokensService(db).getTokenById(authentication.credentialId);
+    return {
+        approvalNotificationsEnabled: token ? token.approvalNotificationsEnabled : true,
+        scope: 'token'
+    };
 }

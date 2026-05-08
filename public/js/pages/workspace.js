@@ -16,6 +16,14 @@ function renderWorkspace(container) {
                 <p class="workspace-subtitle">Use this page for the current dashboard identity, the live server shape, and the CLI wrapper commands that match the active Niyam instance.</p>
             </div>
             <div class="dashboard-hero-rail">
+                <div class="workspace-hero-actions">
+                    <button class="btn btn-primary workspace-direct-command-btn" type="button" data-submit-command-trigger data-testid="workspace-submit-direct-command">
+                        <span class="btn-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                        </span>
+                        Submit Direct Command
+                    </button>
+                </div>
                 <div class="dashboard-hero-note" id="workspace-hero-note">Admin sessions see instance details. Local user sessions can also manage their own CLI tokens here.</div>
                 <div class="workspace-controls" id="workspace-chip-rail"></div>
             </div>
@@ -249,13 +257,23 @@ function renderWorkspaceManagedTokens() {
                 <span class="command-stream-meta-pill">Created · ${formatTime(token.createdAt)}</span>
             ${token.blockedAt ? `<span class="command-stream-meta-pill">Blocked · ${formatTime(token.blockedAt)}</span>` : ''}
             <span class="command-stream-meta-pill">Auto approval · ${formatAutoApprovalMode(token.autoApprovalMode)}</span>
+            <span class="command-stream-meta-pill">Approval notifications · ${token.approvalNotificationsEnabled === false ? 'Off' : 'On'}</span>
             </div>
             <div class="command-stream-actions">
+                ${token.status === 'active'
+                    ? `<button class="btn btn-secondary btn-sm workspace-token-notification-toggle" data-id="${token.id}" data-enabled="${token.approvalNotificationsEnabled === false ? 'false' : 'true'}">${token.approvalNotificationsEnabled === false ? 'Notify Off' : 'Notify On'}</button>`
+                    : ''}
                 ${token.status === 'active' ? `<button class="btn btn-secondary btn-sm workspace-block-token-btn" data-id="${token.id}">Block</button>` : ''}
             </div>
         </article>
     `).join('');
 
+    tokenList.querySelectorAll('.workspace-token-notification-toggle').forEach(button => {
+        button.addEventListener('click', () => updateWorkspaceManagedTokenNotificationPreference(
+            button.dataset.id,
+            button.dataset.enabled !== 'true'
+        ));
+    });
     tokenList.querySelectorAll('.workspace-block-token-btn').forEach(button => {
         button.addEventListener('click', () => blockWorkspaceManagedToken(button.dataset.id));
     });
@@ -465,6 +483,28 @@ async function blockWorkspaceManagedToken(tokenId) {
         await loadWorkspaceManagedTokens(workspacePageState.payload);
     } catch (error) {
         showNotification('Network error while blocking token', 'error');
+    }
+}
+
+async function updateWorkspaceManagedTokenNotificationPreference(tokenId, approvalNotificationsEnabled) {
+    try {
+        const response = await apiFetch(`/my/tokens/${tokenId}/notification-preferences`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                approvalNotificationsEnabled
+            })
+        });
+        const result = await response.json();
+        if (!response.ok) {
+            showNotification(result.error || 'Failed to update token notifications', 'error');
+            return;
+        }
+
+        showNotification(`Approval notifications ${result.token.approvalNotificationsEnabled ? 'enabled' : 'disabled'} for ${result.token.label}`, 'success');
+        await loadWorkspaceManagedTokens(workspacePageState.payload);
+    } catch (error) {
+        showNotification('Network error while updating token notifications', 'error');
     }
 }
 
