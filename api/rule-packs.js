@@ -3,7 +3,8 @@ const {
     getPack,
     installPack,
     listPacks,
-    previewPackUpgrade
+    previewPackUpgrade,
+    uninstallPack
 } = require('../policy/packs');
 const { logAudit } = require('../services/audit-log');
 const { validatePackActionBody, validationError } = require('./validation');
@@ -63,6 +64,19 @@ function createRulePacksRouter(db) {
                 applied: result.applied.length,
                 inserted: result.inserted.length,
                 conflicts: result.local_conflicts.length
+            });
+            res.json(result);
+        } catch (error) {
+            res.status(400).json({ error: error.message });
+        }
+    });
+
+    router.delete('/:packId/install', (req, res) => {
+        try {
+            const result = uninstallPack(db, req.params.packId);
+            logAudit(db, 'rule_pack_uninstalled', 'rule_pack', req.params.packId, req.actor, {
+                packId: req.params.packId,
+                deleted: result.deleted.length
             });
             res.json(result);
         } catch (error) {

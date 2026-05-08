@@ -5,6 +5,7 @@ const { createTokensService } = require('../services/tokens');
 const {
     validateAutoApprovalPreferencePayload,
     validateManagedTokenPayload,
+    validateTokenNotificationPreferencePayload,
     validationError
 } = require('./validation');
 
@@ -87,6 +88,29 @@ function createTokensRouter(db) {
         }
     });
 
+    router.post('/:id/notification-preferences', (req, res) => {
+        const validation = validateTokenNotificationPreferencePayload(req.body);
+        if (!validation.valid) {
+            return validationError(res, validation.errors);
+        }
+
+        try {
+            const token = tokens.setApprovalNotificationPreference(
+                req.params.id,
+                validation.value.approvalNotificationsEnabled
+            );
+            logAudit(db, 'token_notification_preference_changed', 'managed_token', token.id, req.actor, {
+                enabled: token.approvalNotificationsEnabled,
+                subject: token.principalIdentifier,
+                subjectType: token.subjectType,
+                changedBy: req.actor
+            });
+            return res.json({ token });
+        } catch (error) {
+            return handleTokenError(res, error);
+        }
+    });
+
     return router;
 }
 
@@ -149,6 +173,33 @@ function createMyTokensRouter(db) {
                 subjectType: token.subjectType,
                 userId: token.userId,
                 principalIdentifier: token.principalIdentifier
+            });
+            return res.json({ token });
+        } catch (error) {
+            return handleTokenError(res, error);
+        }
+    });
+
+    router.post('/:id/notification-preferences', (req, res) => {
+        if (config.PRODUCT_MODE === 'individual') {
+            return rejectInIndividualMode(res);
+        }
+        const validation = validateTokenNotificationPreferencePayload(req.body);
+        if (!validation.valid) {
+            return validationError(res, validation.errors);
+        }
+
+        try {
+            const token = tokens.setApprovalNotificationPreference(
+                req.params.id,
+                validation.value.approvalNotificationsEnabled,
+                { userId: req.principal.userId }
+            );
+            logAudit(db, 'token_notification_preference_changed', 'managed_token', token.id, req.actor, {
+                enabled: token.approvalNotificationsEnabled,
+                subject: token.principalIdentifier,
+                subjectType: token.subjectType,
+                changedBy: req.actor
             });
             return res.json({ token });
         } catch (error) {

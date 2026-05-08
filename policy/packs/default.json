@@ -1,0 +1,117 @@
+{
+  "id": "default",
+  "name": "Default Rules",
+  "version": "1.0.0",
+  "description": "The starter policy rules Niyam enables for new workspaces.",
+  "rules": [
+    {
+      "pack_rule_id": "force-push-detection",
+      "name": "Force Push Detection",
+      "description": "Detect force push operations",
+      "rule_type": "pattern",
+      "pattern": "push\\s+.*--force",
+      "risk_level": "HIGH",
+      "priority": 100
+    },
+    {
+      "pack_rule_id": "pr-merge-detection",
+      "name": "PR Merge Detection",
+      "description": "Detect PR merge operations",
+      "rule_type": "pattern",
+      "pattern": "pr\\s+merge",
+      "risk_level": "HIGH",
+      "priority": 100
+    },
+    {
+      "pack_rule_id": "branch-delete-detection",
+      "name": "Branch Delete Detection",
+      "description": "Detect branch deletion operations",
+      "rule_type": "pattern",
+      "pattern": "branch\\s+delete|branch\\s+-D|branch\\s+-d\\s+",
+      "risk_level": "HIGH",
+      "priority": 100
+    },
+    {
+      "pack_rule_id": "repo-delete-detection",
+      "name": "Repo Delete Detection",
+      "description": "Detect repository deletion",
+      "rule_type": "pattern",
+      "pattern": "repo\\s+delete|repo\\s+remove",
+      "risk_level": "HIGH",
+      "priority": 100
+    },
+    {
+      "pack_rule_id": "workflow-run-detection",
+      "name": "Workflow Run Detection",
+      "description": "Detect workflow execution",
+      "rule_type": "pattern",
+      "pattern": "workflow\\s+run|workflow\\s+dispatch",
+      "risk_level": "HIGH",
+      "priority": 100
+    },
+    {
+      "pack_rule_id": "secret-set-detection",
+      "name": "Secret Set Detection",
+      "description": "Detect secret setting operations",
+      "rule_type": "pattern",
+      "pattern": "secret\\s+set|secrets\\s+set",
+      "risk_level": "HIGH",
+      "priority": 100
+    },
+    {
+      "pack_rule_id": "pr-create-detection",
+      "name": "PR Create Detection",
+      "description": "Detect PR creation",
+      "rule_type": "pattern",
+      "pattern": "pr\\s+create",
+      "risk_level": "MEDIUM",
+      "priority": 90
+    },
+    {
+      "pack_rule_id": "issue-close-detection",
+      "name": "Issue Close Detection",
+      "description": "Detect issue closure",
+      "rule_type": "pattern",
+      "pattern": "issue\\s+close",
+      "risk_level": "MEDIUM",
+      "priority": 90
+    },
+    {
+      "pack_rule_id": "branch-create-detection",
+      "name": "Branch Create Detection",
+      "description": "Detect branch creation",
+      "rule_type": "pattern",
+      "pattern": "branch\\s+create",
+      "risk_level": "MEDIUM",
+      "priority": 90
+    },
+    {
+      "pack_rule_id": "repo-edit-detection",
+      "name": "Repo Edit Detection",
+      "description": "Detect repository editing",
+      "rule_type": "pattern",
+      "pattern": "repo\\s+edit",
+      "risk_level": "MEDIUM",
+      "priority": 90
+    },
+    {
+      "pack_rule_id": "view-operations",
+      "name": "View Operations",
+      "description": "Read-only view operations",
+      "rule_type": "pattern",
+      "pattern": "(pr|issue|repo|branch|workflow)\\s+(view|list)",
+      "risk_level": "LOW",
+      "priority": 80
+    },
+    {
+      "pack_rule_id": "sample-wrapper-rule",
+      "name": "Sample Wrapper Rule",
+      "description": "Example execution_mode rule. Disabled by default; enable and adapt the pattern to force wrapper mode for matched commands.",
+      "rule_type": "execution_mode",
+      "pattern": "rm\\s+-rf",
+      "execution_mode": "WRAPPER",
+      "enabled_by_default": false,
+      "priority": 110
+    }
+  ]
+}

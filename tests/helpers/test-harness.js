@@ -297,6 +297,7 @@ function createTestContext(test, options = {}) {
             NIYAM_EXEC_WRAPPER: defaults.execWrapper,
             NIYAM_EXEC_DATA_KEY: state.currentExecKey,
             NIYAM_DATA_DIR: dataDir,
+            NIYAM_NATIVE_NOTIFICATIONS_DISABLED: 'true',
             ...envOverrides
         };
     }

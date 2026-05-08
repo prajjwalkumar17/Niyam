@@ -32,11 +32,13 @@ const AUDIT_EVENT_CONFIG = {
     approval_granted: { code: 'AP', tone: 'approved', class: 'event-approved', label: 'Approval Granted' },
     auto_approval_preference_changed: { code: 'AA', tone: '', class: '', label: 'Auto Approval Preference Changed' },
     token_created: { code: 'TK', tone: 'approved', class: 'event-approved', label: 'Token Created' },
+    token_notification_preference_changed: { code: 'NT', tone: '', class: '', label: 'Token Notification Preference Changed' },
     token_blocked: { code: 'TB', tone: 'warning', class: 'event-command_blocked', label: 'Token Blocked' },
     rule_created: { code: 'RC', tone: '', class: '', label: 'Rule Created' },
     rule_updated: { code: 'RU', tone: '', class: '', label: 'Rule Updated' },
     rule_deleted: { code: 'RD', tone: 'rejected', class: 'event-rejected', label: 'Rule Deleted' },
     rule_pack_installed: { code: 'PK', tone: '', class: '', label: 'Rule Pack Installed' },
+    rule_pack_uninstalled: { code: 'PU', tone: 'rejected', class: 'event-rejected', label: 'Rule Pack Uninstalled' },
     rule_pack_upgrade_previewed: { code: 'PV', tone: '', class: '', label: 'Rule Pack Upgrade Previewed' },
     rule_pack_upgraded: { code: 'UP', tone: '', class: '', label: 'Rule Pack Upgraded' },
     signup_requested: { code: 'SR', tone: '', class: '', label: 'Signup Requested' },
@@ -88,11 +90,13 @@ function renderAudit(container) {
                     <option value="approval_granted">Approval Granted</option>
                     <option value="auto_approval_preference_changed">Auto Approval Preference Changed</option>
                     <option value="token_created">Token Created</option>
+                    <option value="token_notification_preference_changed">Token Notification Preference Changed</option>
                     <option value="token_blocked">Token Blocked</option>
                     <option value="rule_created">Rule Created</option>
                     <option value="rule_updated">Rule Updated</option>
                     <option value="rule_deleted">Rule Deleted</option>
                     <option value="rule_pack_installed">Rule Pack Installed</option>
+                    <option value="rule_pack_uninstalled">Rule Pack Uninstalled</option>
                     <option value="rule_pack_upgrade_previewed">Rule Pack Upgrade Previewed</option>
                     <option value="rule_pack_upgraded">Rule Pack Upgraded</option>
                     <option value="signup_requested">Signup Requested</option>

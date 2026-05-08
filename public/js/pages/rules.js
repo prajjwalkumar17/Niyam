@@ -172,13 +172,23 @@ function renderRulePacks(packs) {
                 </div>
             </div>
             <div class="pack-actions">
-                <button class="btn btn-secondary btn-sm" onclick="previewRulePack('${pack.id}')">Preview</button>
-                <button class="btn btn-secondary btn-sm" onclick="previewRulePackUpgrade('${pack.id}')">Upgrade Preview</button>
-                <button class="btn btn-primary btn-sm" onclick="installRulePack('${pack.id}')">Install</button>
-                <button class="btn btn-secondary btn-sm" onclick="upgradeRulePack('${pack.id}')">Upgrade</button>
+                ${renderRulePackActions(pack)}
             </div>
         </article>
     `).join('');
+}
+
+function renderRulePackActions(pack) {
+    const installAction = pack.installed
+        ? `<button class="btn btn-danger btn-sm" onclick="uninstallRulePack('${pack.id}')">Uninstall</button>`
+        : `<button class="btn btn-primary btn-sm" onclick="installRulePack('${pack.id}')">Install</button>`;
+
+    return `
+        <button class="btn btn-secondary btn-sm" onclick="previewRulePack('${pack.id}')">Preview</button>
+        <button class="btn btn-secondary btn-sm" onclick="previewRulePackUpgrade('${pack.id}')">Upgrade Preview</button>
+        ${installAction}
+        <button class="btn btn-secondary btn-sm" onclick="upgradeRulePack('${pack.id}')" ${pack.installed ? '' : 'disabled'}>Upgrade</button>
+    `;
 }
 
 function initRulePackLibrary() {
@@ -488,6 +498,27 @@ async function installRulePack(packId) {
         loadRulesPage();
     } catch (error) {
         showNotification(error.message || 'Failed to install pack', 'error');
+    }
+}
+
+async function uninstallRulePack(packId) {
+    if (!confirm(`Uninstall rule pack "${packId}"? This deletes its managed rules from the policy catalog.`)) {
+        return;
+    }
+
+    try {
+        const response = await apiFetch(`/rule-packs/${packId}/install`, {
+            method: 'DELETE'
+        });
+        const result = await response.json();
+        if (!response.ok) {
+            throw new Error(result.error || 'Failed to uninstall pack');
+        }
+
+        showNotification(`Uninstalled ${result.deleted.length} rule(s) from ${packId}`, 'success');
+        loadRulesPage();
+    } catch (error) {
+        showNotification(error.message || 'Failed to uninstall pack', 'error');
     }
 }
 

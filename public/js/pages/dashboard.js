@@ -14,7 +14,7 @@ function renderDashboard(container) {
                 <div class="dashboard-hero-note">Live snapshot of what is moving, what is blocked, and what needs review next.</div>
                 <div class="workspace-controls">
                     <span class="workspace-chip">Live snapshot</span>
-                    <span class="workspace-chip">Auto-refresh aware</span>
+                    <span class="workspace-chip">Realtime aware</span>
                 </div>
             </div>
         </section>

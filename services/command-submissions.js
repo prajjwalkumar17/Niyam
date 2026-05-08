@@ -9,6 +9,7 @@ const { createApprovalPreferencesService } = require('./approval-preferences');
 const { applyAutoApprovalIfEligible } = require('./approval-automation');
 const { addAuthDetails, buildAuthenticationContext, toAuthColumns } = require('./auth-context');
 const { logAudit } = require('./audit-log');
+const { createTokensService } = require('./tokens');
 
 function prepareCommandSubmission(db, { command, args = [], metadata = {} }) {
     const policyEngine = new PolicyEngine(db);
@@ -56,6 +57,7 @@ function persistCommandSubmission(options) {
         },
         authentication
     });
+    const notificationPreference = resolveApprovalNotificationPreference(db, authentication);
     const initialApprovalMode = evaluation.autoApproved
         ? 'policy_auto'
         : describeApprovalModeForSubmission(evaluation.riskLevel, approvalPreferences);
@@ -129,6 +131,8 @@ function persistCommandSubmission(options) {
         approvalAutomationEnabled: approvalPreferences.autoApprovalEnabled,
         autoApprovalMode: approvalPreferences.autoApprovalMode,
         approvalAutomationScope: approvalPreferences.scope,
+        approvalNotificationsEnabled: notificationPreference.approvalNotificationsEnabled,
+        approvalNotificationPreferenceScope: notificationPreference.scope,
         approvalMode: initialApprovalMode
     };
 
@@ -178,4 +182,19 @@ function describeApprovalModeForSubmission(riskLevel, preference) {
     }
 
     return 'manual_pending';
+}
+
+function resolveApprovalNotificationPreference(db, authentication) {
+    if (!authentication || authentication.mode !== 'managed_token' || !authentication.credentialId) {
+        return {
+            approvalNotificationsEnabled: true,
+            scope: 'session'
+        };
+    }
+
+    const token = createTokensService(db).getTokenById(authentication.credentialId);
+    return {
+        approvalNotificationsEnabled: token ? token.approvalNotificationsEnabled : true,
+        scope: 'token'
+    };
 }

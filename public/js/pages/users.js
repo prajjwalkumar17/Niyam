@@ -157,6 +157,7 @@ function renderManagedTokensList() {
                 <span class="command-stream-meta-pill">Created · ${formatTime(token.createdAt)}</span>
                 <span class="command-stream-meta-pill">Created By · ${escapeHtml(token.createdBy)}</span>
                 <span class="command-stream-meta-pill">Auto Approval · ${escapeHtml(describeManagedTokenAutoApproval(token))}</span>
+                <span class="command-stream-meta-pill">Approval Notifications · ${token.approvalNotificationsEnabled === false ? 'Off' : 'On'}</span>
                 ${token.blockedAt ? `<span class="command-stream-meta-pill">Blocked · ${formatTime(token.blockedAt)}</span>` : ''}
                 ${token.linkedUser ? `<span class="command-stream-meta-pill">User · ${escapeHtml(token.linkedUser.username)}</span>` : ''}
             </div>
@@ -172,6 +173,9 @@ function renderManagedTokensList() {
                         </div>
                     `
                     : ''}
+                ${token.status === 'active'
+                    ? `<button class="btn btn-secondary btn-sm token-notification-toggle" data-id="${token.id}" data-enabled="${token.approvalNotificationsEnabled === false ? 'false' : 'true'}">${token.approvalNotificationsEnabled === false ? 'Notify Off' : 'Notify On'}</button>`
+                    : ''}
                 ${token.status === 'active' ? `<button class="btn btn-secondary btn-sm block-token-btn" data-id="${token.id}">Block</button>` : ''}
             </div>
         </article>
@@ -182,6 +186,12 @@ function renderManagedTokensList() {
     });
     list.querySelectorAll('.block-token-btn').forEach(button => {
         button.addEventListener('click', () => blockManagedToken(button.dataset.id, '/tokens'));
+    });
+    list.querySelectorAll('.token-notification-toggle').forEach(button => {
+        button.addEventListener('click', () => updateManagedTokenNotificationPreference(
+            button.dataset.id,
+            button.dataset.enabled !== 'true'
+        ));
     });
 }
 
@@ -612,10 +622,35 @@ async function updateManagedTokenAutoApprovalMode(tokenId, autoApprovalMode) {
             return;
         }
 
-        showNotification(`Auto approver set to ${formatAutoApprovalMode(result.token.autoApprovalMode)} for ${result.token.label}`, 'success');
+        const notificationSuffix = autoApprovalMode !== 'off' && result.token.approvalNotificationsEnabled === false
+            ? '; approval notifications turned off'
+            : '';
+        showNotification(`Auto approver set to ${formatAutoApprovalMode(result.token.autoApprovalMode)} for ${result.token.label}${notificationSuffix}`, 'success');
         loadUsersPage();
     } catch (error) {
         showNotification('Network error while updating token auto approval', 'error');
+    }
+}
+
+async function updateManagedTokenNotificationPreference(tokenId, approvalNotificationsEnabled) {
+    try {
+        const response = await apiFetch(`/tokens/${tokenId}/notification-preferences`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                approvalNotificationsEnabled
+            })
+        });
+        const result = await response.json();
+        if (!response.ok) {
+            showNotification(result.error || result.details?.join(', ') || 'Failed to update token notifications', 'error');
+            return;
+        }
+
+        showNotification(`Approval notifications ${result.token.approvalNotificationsEnabled ? 'enabled' : 'disabled'} for ${result.token.label}`, 'success');
+        loadUsersPage();
+    } catch (error) {
+        showNotification('Network error while updating token notifications', 'error');
     }
 }
 
